@@ -13,3 +13,4 @@ python-fasthtml
 pandas
 anthropic
 quarto-cli
+tqdm
