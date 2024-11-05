@@ -578,4 +578,23 @@ async def slack_events(req: Request):
         logger.error(f"Error handling Slack event: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="An error occurred processing the Slack event")
     
+@app.post("/slack/retrieve-articles")
+async def handle_retrieve_articles(req: Request):
+    try:
+        # Check rate limits
+        for rate_limit in rate_limits:
+            if not limiter.hit(rate_limit, "global", req.client.host):
+                logger.warning("Rate limit exceeded")
+                raise HTTPException(status_code=429, detail="Too many requests")
+        
+        # Get form data
+        form_data = await req.form()
+        logger.info(f"Received retrieve-articles command: {form_data}")
+        
+        # Pass to handler
+        return await handler.handle(req)
+    except Exception as e:
+        logger.error(f"Error handling retrieve-articles command: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="An error occurred processing the command")
+
 serve()
