@@ -78,7 +78,6 @@ class Settings(BaseSettings):
     PORT: int = Field(default=8000)
     SLACK_BOT_TOKEN: str = Field(default="default_token")
     SLACK_SIGNING_SECRET: str = Field(default="default_secret")
-    READWISE_API_KEY: str = Field(default="default_api_key")
     RATE_LIMIT_PER_MINUTE: int = Field(default=20)
     LOG_LEVEL: str = Field(default="INFO")
     EMOJI_CONFIGS: Dict[str, EmojiConfig] = Field(
@@ -99,6 +98,13 @@ class Settings(BaseSettings):
     NUMBER_OF_SHORT_ARTICLES: int = Field(default=5)
     MIN_DAYS_TO_CHECK: int = Field(default=14)
     MAXIMUM_DAYS_TO_CHECK: int = Field(default=30)
+    
+    # Wallabag settings
+    WALLABAG_CLIENT_ID: str = Field(default="")
+    WALLABAG_CLIENT_SECRET: str = Field(default="")
+    WALLABAG_USERNAME: str = Field(default="")
+    WALLABAG_PASSWORD: str = Field(default="")
+    WALLABAG_URL: str = Field(default="https://app.wallabag.it")
 
     @property
     def RATE_LIMIT(self) -> str:

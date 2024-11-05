@@ -1,11 +1,11 @@
-# Slack Readwise Integration
+# Slack Wallabag Integration
 
-This application integrates Slack with Readwise Reader, allowing you to save URLs shared in Slack to your Readwise account with customizable reactions and messages.
+This application integrates Slack with Wallabag, allowing you to save URLs shared in Slack to your Wallabag account with customizable reactions and messages.
 
 [![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/AzS2fY?referralCode=mOVLfw)
 
 ## Features
-- Save URLs shared in Slack to Readwise Reader when specific emoji reactions are added
+- Save URLs shared in Slack to Wallabag when specific emoji reactions are added
 - Each emoji reaction saves the article with its specific tag (one tag per article)
 - Query articles by tag and date using the `/retrieve-articles` command
 - Custom confirmation messages for each emoji reaction
@@ -20,7 +20,11 @@ Click the "Deploy to Railway" button above to start the deployment process. Don'
 Required Environment Variables:
 - `SLACK_BOT_TOKEN`: Your Slack Bot Token
 - `SLACK_SIGNING_SECRET`: Your Slack Signing Secret
-- `READWISE_API_KEY`: Your Readwise API Key
+- `WALLABAG_CLIENT_ID`: Your Wallabag Client ID
+- `WALLABAG_CLIENT_SECRET`: Your Wallabag Client Secret
+- `WALLABAG_USERNAME`: Your Wallabag Username
+- `WALLABAG_PASSWORD`: Your Wallabag Password
+- `WALLABAG_URL`: Your Wallabag URL (defaults to https://app.wallabag.it)
 - `ALLOWED_HOSTS`: Comma-separated list of allowed hosts (e.g., your-app-name.railway.app)
 
 Optional Environment Variables:
@@ -58,13 +62,13 @@ If EMOJI_CONFIGS is not set, it defaults to using the :bookmark: emoji with a st
 
 ## Usage
 
-### 1. Saving URLs to Readwise
+### 1. Saving URLs to Wallabag
 1. Add the Slack bot to your workspace and invite it to the desired channels.
 2. When a message containing a URL is posted, react to it with one of your configured emojis.
 3. The bot will:
    - Extract the URL from the message
-   - Check if it's already saved in Readwise
-   - If it's new, save it to Readwise with the emoji's specific tag
+   - Check if it's already saved in Wallabag
+   - If it's new, save it to Wallabag with the emoji's specific tag
    - Post a custom confirmation message in the thread
 
 ### 2. Retrieving Articles
@@ -90,7 +94,6 @@ Each example will return all articles tagged with that emoji's label (e.g., "Rea
 The response includes:
 - Article title
 - Date added
-- Summary (truncated if too long)
 - URL
 
 Long responses are automatically split into multiple messages to comply with Slack's message length limits.
@@ -127,14 +130,14 @@ Configuration Steps:
    - Set the request URL to: https://your-app.railway.app/slack/events
    - Add a description: "Retrieve articles with a specific tag since a given date"
    - Add usage hint: ":emoji: date (e.g., :bookmark: 2024-01-01)"
-5. Get your [Readwise API key](https://readwise.io/access_token)
+5. Set up your Wallabag account and get your client credentials
 6. Add all environment variables to your Railway application
 7. Invite your bot to desired Slack channels
 
 Test the integration by:
 1. Reacting to a message containing a URL with one of your configured emojis. You should see:
    - A confirmation message in the Slack thread
-   - The article appear in your Readwise Reader with the emoji's specific tag
+   - The article appear in your Wallabag account with the emoji's specific tag
 2. Using the `/retrieve-articles` command with an emoji and date to fetch saved articles. The response will only be visible to you.
 
 ## Local Development

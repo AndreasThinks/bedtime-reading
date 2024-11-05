@@ -41,92 +41,135 @@ app = AsyncApp(
 trigger_emojis = get_trigger_emojis()
 deduplicator = EventDeduplicator()
 
-async def get_tagged_articles_since_date(tag: str, since_date: date) -> list:
-    """
-    Query Readwise API for articles with a specific tag since a given date.
-    Returns a list of articles with their titles, summaries, and dates.
-    """
-    articles = []
-    next_page_cursor = None
-    
-    while True:
+class WallabagClient:
+    def __init__(self):
+        self.access_token = None
+        self.token_expires = 0
+        self.base_url = settings.WALLABAG_URL
+
+    async def get_token(self):
+        """Get or refresh the Wallabag access token."""
+        current_time = time.time()
+        if self.access_token and current_time < self.token_expires:
+            return self.access_token
+
         try:
-            url = "https://readwise.io/api/v3/list/"
-            params = {
-                'updatedAfter': since_date.isoformat() + 'T00:00:00Z'  # Convert to ISO 8601 format with UTC timezone
-            }
-            if next_page_cursor:
-                params['pageCursor'] = next_page_cursor
-
-            logger.info(f"Querying Readwise API with params: {params}")
-
-            response = requests.get(
-                url,
-                headers={"Authorization": f"Token {settings.READWISE_API_KEY}"},
-                params=params,
+            response = requests.post(
+                f"{self.base_url}/oauth/v2/token",
+                data={
+                    "grant_type": "password",
+                    "client_id": settings.WALLABAG_CLIENT_ID,
+                    "client_secret": settings.WALLABAG_CLIENT_SECRET,
+                    "username": settings.WALLABAG_USERNAME,
+                    "password": settings.WALLABAG_PASSWORD
+                },
                 timeout=10
             )
             response.raise_for_status()
             data = response.json()
-
-            # Log the response for debugging
-            logger.info(f"Received response from Readwise API with {len(data.get('results', []))} results")
-
-            # Check if data and results exist
-            if not data or 'results' not in data:
-                logger.error("Invalid response format from Readwise API")
-                break
-
-            results = data.get('results', [])
-            if not results:  # If results is None or empty
-                break
-
-            # Process articles
-            for article in results:
-                if not article:  # Skip if article is None
-                    continue
-                    
-                # Check if the article has the specified tag
-                article_tags = article.get('tags', [])
-                if not article_tags or tag not in article_tags:
-                    continue
-
-                created_at = article.get('created_at')
-                if not created_at:  # Skip if no creation date
-                    continue
-                    
-                created_at_dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                summary = article.get('summary', 'No summary available')
-                # Truncate summary if it's too long for Slack
-                if len(summary) > 500:
-                    summary = summary[:497] + "..."
-
-                articles.append({
-                    'title': article.get('title', 'No title'),
-                    'summary': summary,
-                    'date': created_at_dt.strftime('%Y-%m-%d'),
-                    'url': article.get('source_url', '')
-                })
-
-            # Check if there are more pages
-            next_page_cursor = data.get('nextPageCursor')
-            if not next_page_cursor:
-                break
-
-        except requests.RequestException as e:
-            logger.error(f"Error querying Readwise API: {str(e)}")
-            break
+            self.access_token = data["access_token"]
+            self.token_expires = current_time + data["expires_in"] - 300  # Refresh 5 minutes before expiry
+            return self.access_token
         except Exception as e:
-            logger.error(f"Unexpected error querying Readwise API: {str(e)}")
-            break
+            logger.error(f"Error getting Wallabag token: {str(e)}")
+            raise
 
-    return articles
+    async def get_headers(self):
+        """Get headers with current access token."""
+        token = await self.get_token()
+        return {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
 
-async def save_url_to_readwise(url: str, emoji: str) -> tuple[bool, str]:
-    """
-    Save a URL to Readwise Reader with the emoji's label as a tag.
-    Returns (success, message) tuple.
-    """
+    async def save_url(self, url: str, tags: list[str]) -> tuple[bool, str]:
+        """Save a URL to Wallabag with tags."""
+        try:
+            headers = await self.get_headers()
+            response = requests.post(
+                f"{self.base_url}/api/entries",
+                headers=headers,
+                json={
+                    "url": url,
+                    "tags": tags
+                },
+                timeout=10
+            )
+            response.raise_for_status()
+            data = response.json()
+            return True, data.get('url', url)
+        except requests.RequestException as e:
+            logger.error(f"Error saving URL to Wallabag: {str(e)}")
+            return False, str(e)
+
+    async def check_url_exists(self, url: str) -> bool:
+        """Check if a URL already exists in Wallabag."""
+        try:
+            headers = await self.get_headers()
+            response = requests.get(
+                f"{self.base_url}/api/entries/exists",
+                headers=headers,
+                params={"url": url},
+                timeout=10
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data.get('exists', False)
+        except requests.RequestException as e:
+            logger.error(f"Error checking URL in Wallabag: {str(e)}")
+            return False
+
+    async def get_tagged_articles(self, tag: str, since_date: date) -> list:
+        """Get articles with specific tag since a given date."""
+        try:
+            headers = await self.get_headers()
+            articles = []
+            page = 1
+            
+            while True:
+                response = requests.get(
+                    f"{self.base_url}/api/entries",
+                    headers=headers,
+                    params={
+                        "tags": [tag],
+                        "since": int(datetime.combine(since_date, datetime.min.time()).timestamp()),
+                        "page": page,
+                        "perPage": 100
+                    },
+                    timeout=10
+                )
+                response.raise_for_status()
+                data = response.json()
+                
+                if not data.get('_embedded', {}).get('items'):
+                    break
+                    
+                for entry in data['_embedded']['items']:
+                    articles.append({
+                        'title': entry.get('title', 'No title'),
+                        'date': datetime.fromtimestamp(entry['created_at']).strftime('%Y-%m-%d'),
+                        'url': entry.get('url', '')
+                    })
+                
+                if page >= data.get('pages', 1):
+                    break
+                    
+                page += 1
+                
+            return articles
+        except Exception as e:
+            logger.error(f"Error getting tagged articles from Wallabag: {str(e)}")
+            return []
+
+# Initialize Wallabag client
+wallabag_client = WallabagClient()
+
+async def get_tagged_articles_since_date(tag: str, since_date: date) -> list:
+    """Get articles with a specific tag since a given date."""
+    return await wallabag_client.get_tagged_articles(tag, since_date)
+
+async def save_url_to_wallabag(url: str, emoji: str) -> tuple[bool, str]:
+    """Save a URL to Wallabag with the emoji's label as a tag."""
     try:
         # Get emoji configuration to use its label as a tag
         emoji_configs = get_emoji_configs()
@@ -135,84 +178,15 @@ async def save_url_to_readwise(url: str, emoji: str) -> tuple[bool, str]:
         # Use the emoji's label as the tag
         tag = emoji_config.label if emoji_config else "Read Later"
         
-        response = requests.post(
-            "https://readwise.io/api/v3/save/",
-            headers={
-                "Authorization": f"Token {settings.READWISE_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "url": url,
-                "tags": [tag],  # Only use the emoji's label as the tag
-                "location": "new",  # Save to "new" items
-                "saved_using": "slack-readwise-integration"  # Identify our app
-            },
-            timeout=10  # Add timeout
-        )
-        
-        # Check response status
-        if response.status_code == 201:
-            data = response.json()
-            reader_url = data.get('url', url)
-            return True, reader_url
-        elif response.status_code == 200:
-            # Document already exists
-            data = response.json()
-            reader_url = data.get('url', url)
-            return False, f"Document already exists at {reader_url}"
-        else:
-            response.raise_for_status()
-            return False, "Unknown error occurred"
+        return await wallabag_client.save_url(url, [tag])
             
-    except requests.RequestException as e:
-        logger.error(f"Error saving URL to Readwise: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error saving URL to Wallabag: {str(e)}")
         return False, str(e)
 
 async def check_url_exists(url: str) -> bool:
-    """Check if a URL already exists in Readwise Reader."""
-    try:
-        # Normalize the URL for comparison
-        normalized_url = url.rstrip('/')
-        
-        # Initialize pagination
-        next_cursor = None
-        while True:
-            params = {
-                'source_url': normalized_url,  # Use source_url parameter for filtering
-                'category': 'article'  # Only look for articles, not highlights
-            }
-            if next_cursor:
-                params['pageCursor'] = next_cursor
-                
-            response = requests.get(
-                "https://readwise.io/api/v3/list/",
-                headers={
-                    "Authorization": f"Token {settings.READWISE_API_KEY}"
-                },
-                params=params,
-                timeout=10  # Add timeout
-            )
-            response.raise_for_status()
-            data = response.json()
-            
-            # Check results
-            for article in data.get('results', []):
-                article_url = article.get('source_url', '').rstrip('/')
-                if article_url == normalized_url:
-                    logger.info(f"Found exact URL match: {url}")
-                    return True
-            
-            # Check if there are more pages
-            next_cursor = data.get('nextPageCursor')
-            if not next_cursor:
-                break
-        
-        logger.info(f"No exact URL match found for: {url}")
-        return False
-        
-    except requests.RequestException as e:
-        logger.error(f"Error checking URL in Readwise: {str(e)}")
-        return False
+    """Check if a URL already exists in Wallabag."""
+    return await wallabag_client.check_url_exists(url)
 
 @app.command("/retrieve-articles")
 async def handle_retrieve_command(ack, respond, command):
@@ -294,7 +268,6 @@ async def handle_retrieve_command(ack, respond, command):
             response_text += (
                 f"• *{article['title']}*\n"
                 f"  Added on: {article['date']}\n"
-                f"  {article['summary']}\n"
                 f"  <{article['url']}|Read article>\n\n"
             )
 
@@ -338,11 +311,11 @@ async def handle_reaction(event, say, client):
                 # First, check if the URL already exists
                 url_exists = await check_url_exists(url)
                 if url_exists:
-                    logger.info(f"URL already exists in Readwise, skipping: {url}")
+                    logger.info(f"URL already exists in Wallabag, skipping: {url}")
                     # No message is posted to Slack for duplicate URLs
                 else:
                     # If the URL doesn't exist, save it with the emoji's tag
-                    success, result = await save_url_to_readwise(url, reaction)
+                    success, result = await save_url_to_wallabag(url, reaction)
                     if success:
                         # Get custom message for the specific emoji
                         custom_message = get_emoji_message(reaction)
@@ -353,7 +326,7 @@ async def handle_reaction(event, say, client):
                             thread_ts=message_ts
                         )
                     else:
-                        logger.error(f"Failed to save URL to Readwise: {result}")
+                        logger.error(f"Failed to save URL to Wallabag: {result}")
         else:
             logger.warning("No message found in the conversation history")
     except Exception as e:
