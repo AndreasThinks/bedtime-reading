@@ -6,7 +6,9 @@ This application integrates Slack with Readwise Reader, allowing you to save URL
 
 ## Features
 - Save URLs shared in Slack to Readwise Reader when specific emoji reactions are added
-- Configurable emoji reactions with custom labels and messages
+- Each emoji reaction saves the article with its specific tag (one tag per article)
+- Custom confirmation messages for each emoji reaction
+- Configurable newsletter tags for including articles in the newsletter
 - Automatic duplicate detection to prevent saving the same article twice
 - Configurable rate limiting
 - Secure handling of environment variables
@@ -21,21 +23,37 @@ Required Environment Variables:
 - `ALLOWED_HOSTS`: Comma-separated list of allowed hosts (e.g., your-app-name.railway.app)
 
 Optional Environment Variables:
-- `DOCUMENT_TAG`: Tag to apply to saved articles in Readwise (default: "slack-import")
 - `RATE_LIMIT_PER_MINUTE`: Number of requests allowed per minute (default: 20)
 - `EMOJI_CONFIGS`: Configuration for emoji reactions in the format "emoji1:label1:message1;emoji2:label2:message2"
+- `NEWSLETTER_TAGS`: Comma-separated list of tags to include in the newsletter (default: "Newsletter")
 
-Example Emoji Configuration:
+Example Configuration:
+
+1. Emoji Configuration:
 ```
-EMOJI_CONFIGS=bookmark:Read Later:📚 Added to your reading list;brain:Study Material:🧠 Saved as study material - don't forget to add highlights!;star:Must Read:⭐ Marked as must-read priority article
+EMOJI_CONFIGS=bookmark:Read Later:📚 Added to your reading list;brain:Study Material:🧠 Saved as study material;star:Must Read:⭐ Marked as must-read
 ```
 
-This creates three different reactions:
-1. :bookmark: - For general articles to read later
-2. :brain: - For study materials that need highlighting
-3. :star: - For high-priority must-read articles
+This creates three different reactions with distinct purposes:
+- :bookmark: - Tags articles as "Read Later" for general reading
+- :brain: - Tags articles as "Study Material" for learning resources
+- :star: - Tags articles as "Must Read" for important content
 
-If EMOJI_CONFIGS is not set, it defaults to using the :bookmark: emoji with a standard message.
+2. Newsletter Tags:
+```
+NEWSLETTER_TAGS=Must Read,Study Material
+```
+
+This configuration would include articles tagged with either "Must Read" or "Study Material" in the newsletter. You can specify any combination of tags that match your emoji configurations.
+
+Each article is saved with exactly one tag based on the emoji used. For example:
+- Using :bookmark: saves the article with only the "Read Later" tag
+- Using :brain: saves the article with only the "Study Material" tag
+- Using :star: saves the article with only the "Must Read" tag
+
+Articles with tags listed in NEWSLETTER_TAGS will be included in the newsletter. If NEWSLETTER_TAGS is not set, it defaults to including only articles tagged with "Newsletter".
+
+If EMOJI_CONFIGS is not set, it defaults to using the :bookmark: emoji with a standard message and "Read Later" tag.
 
 ## Usage
 1. Add the Slack bot to your workspace and invite it to the desired channels.
@@ -43,8 +61,8 @@ If EMOJI_CONFIGS is not set, it defaults to using the :bookmark: emoji with a st
 3. The bot will:
    - Extract the URL from the message
    - Check if it's already saved in Readwise
-   - If it's new, save it to Readwise with your configured tag
-   - Post a custom confirmation message (based on the emoji used) in the thread
+   - If it's new, save it to Readwise with the emoji's specific tag
+   - Post a custom confirmation message in the thread
 
 ## Installation
 To add the application to Slack, you *must* have deployed the back-end on Railway using the process above.
@@ -72,7 +90,7 @@ Configuration Steps:
 
 Test the integration by reacting to a message containing a URL with one of your configured emojis. You should see:
 - A confirmation message in the Slack thread
-- The article appear in your Readwise Reader
+- The article appear in your Readwise Reader with the emoji's specific tag
 
 ## Local Development
 1. Clone this repository

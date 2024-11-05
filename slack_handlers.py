@@ -2,7 +2,7 @@ import logging
 from slack_bolt.async_app import AsyncApp
 from config import settings
 import requests
-from utils import extract_and_validate_url, get_trigger_emojis, get_emoji_message
+from utils import extract_and_validate_url, get_trigger_emojis, get_emoji_message, get_emoji_configs
 from functools import wraps
 import time
 
@@ -39,12 +39,19 @@ app = AsyncApp(
 trigger_emojis = get_trigger_emojis()
 deduplicator = EventDeduplicator()
 
-async def save_url_to_readwise(url: str) -> tuple[bool, str]:
+async def save_url_to_readwise(url: str, emoji: str) -> tuple[bool, str]:
     """
-    Save a URL to Readwise Reader with the configured tag.
+    Save a URL to Readwise Reader with the emoji's label as a tag.
     Returns (success, message) tuple.
     """
     try:
+        # Get emoji configuration to use its label as a tag
+        emoji_configs = get_emoji_configs()
+        emoji_config = emoji_configs.get(emoji)
+        
+        # Use the emoji's label as the tag
+        tag = emoji_config.label if emoji_config else "Read Later"
+        
         response = requests.post(
             "https://readwise.io/api/v3/save/",
             headers={
@@ -53,7 +60,7 @@ async def save_url_to_readwise(url: str) -> tuple[bool, str]:
             },
             json={
                 "url": url,
-                "tags": [settings.DOCUMENT_TAG],
+                "tags": [tag],  # Only use the emoji's label as the tag
                 "location": "new",  # Save to "new" items
                 "saved_using": "slack-readwise-integration"  # Identify our app
             }
@@ -148,8 +155,8 @@ async def handle_reaction(event, say, client):
                     logger.info(f"URL already exists in Readwise, skipping: {url}")
                     # No message is posted to Slack for duplicate URLs
                 else:
-                    # If the URL doesn't exist, save it
-                    success, result = await save_url_to_readwise(url)
+                    # If the URL doesn't exist, save it with the emoji's tag
+                    success, result = await save_url_to_readwise(url, reaction)
                     if success:
                         # Get custom message for the specific emoji
                         custom_message = get_emoji_message(reaction)
