@@ -53,8 +53,7 @@ async def get_tagged_articles_since_date(tag: str, since_date: date) -> list:
         try:
             url = "https://readwise.io/api/v3/list/"
             params = {
-                'category': 'article',
-                'tags[]': tag,  # Changed from 'tags' to 'tags[]' to match Readwise API format
+                'tags': '[' + tag + ']', 
                 'updated__gt': since_date.isoformat()
             }
             if next_page_cursor:
@@ -289,41 +288,25 @@ async def handle_retrieve_command(ack, respond, command):
             })
             return
         
-        # Format response
-        blocks = [{
-            "type": "header",
-            "text": {
-                "type": "plain_text",
-                "text": f"Articles tagged with '{tag}' since {parsed_date.date()}"
-            }
-        }]
-
+        # Format response as markdown
+        response_text = f"*Articles tagged with '{tag}' since {parsed_date.date()}*\n\n"
+        
         for article in articles:
-            blocks.extend([
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": f"*{article['title']}*\nAdded on: {article['date']}\n{article['summary']}"
-                    }
-                },
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": f"<{article['url']}|Read article>"
-                    }
-                },
-                {"type": "divider"}
-            ])
+            response_text += (
+                f"• *{article['title']}*\n"
+                f"  Added on: {article['date']}\n"
+                f"  {article['summary']}\n"
+                f"  <{article['url']}|Read article>\n\n"
+            )
 
-        # Split message if it's too many blocks for Slack
-        max_blocks = 50
-        for i in range(0, len(blocks), max_blocks):
-            chunk = blocks[i:i + max_blocks]
+        # Split message if it's too long for Slack (max 40000 chars)
+        max_length = 40000
+        chunks = [response_text[i:i + max_length] for i in range(0, len(response_text), max_length)]
+        
+        for chunk in chunks:
             await respond({
                 "response_type": "in_channel",
-                "blocks": chunk
+                "text": chunk
             })
             
     except Exception as e:
