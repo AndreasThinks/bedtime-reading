@@ -7,6 +7,7 @@ from functools import wraps
 import time
 from datetime import datetime, date, timedelta
 import dateparser
+import urllib.parse
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -45,7 +46,8 @@ class WallabagClient:
     def __init__(self):
         self.access_token = None
         self.token_expires = 0
-        self.base_url = settings.WALLABAG_URL
+        # Ensure the base URL doesn't end with a slash
+        self.base_url = settings.WALLABAG_URL.rstrip('/')
 
     async def get_token(self):
         """Get or refresh the Wallabag access token."""
@@ -54,17 +56,33 @@ class WallabagClient:
             return self.access_token
 
         try:
+            # Ensure all credentials are properly URL encoded
+            data = {
+                "grant_type": "password",
+                "client_id": urllib.parse.quote(settings.WALLABAG_CLIENT_ID),
+                "client_secret": urllib.parse.quote(settings.WALLABAG_CLIENT_SECRET),
+                "username": urllib.parse.quote(settings.WALLABAG_USERNAME),
+                "password": urllib.parse.quote(settings.WALLABAG_PASSWORD)
+            }
+
+            # Log the request URL and data (without sensitive info) for debugging
+            logger.info(f"Requesting token from: {self.base_url}/oauth/v2/token")
+            logger.info(f"Using client_id: {settings.WALLABAG_CLIENT_ID}")
+
             response = requests.post(
                 f"{self.base_url}/oauth/v2/token",
-                data={
-                    "grant_type": "password",
-                    "client_id": settings.WALLABAG_CLIENT_ID,
-                    "client_secret": settings.WALLABAG_CLIENT_SECRET,
-                    "username": settings.WALLABAG_USERNAME,
-                    "password": settings.WALLABAG_PASSWORD
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded"
                 },
+                data=data,
                 timeout=10
             )
+
+            # Log the response status and content for debugging
+            logger.info(f"Token request status code: {response.status_code}")
+            if response.status_code != 200:
+                logger.error(f"Token request failed with content: {response.text}")
+
             response.raise_for_status()
             data = response.json()
             self.access_token = data["access_token"]
@@ -72,6 +90,8 @@ class WallabagClient:
             return self.access_token
         except Exception as e:
             logger.error(f"Error getting Wallabag token: {str(e)}")
+            if isinstance(e, requests.exceptions.RequestException):
+                logger.error(f"Response content: {e.response.text if hasattr(e, 'response') else 'No response content'}")
             raise
 
     async def get_headers(self):
