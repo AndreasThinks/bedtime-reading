@@ -7,7 +7,7 @@ This application integrates Slack with Readwise Reader, allowing you to save URL
 ## Features
 - Save URLs shared in Slack to Readwise Reader when specific emoji reactions are added
 - Each emoji reaction saves the article with its specific tag (one tag per article)
-- Query articles by tag and date using emoji reactions
+- Query articles by tag and date using the `/retrieve-articles` command
 - Custom confirmation messages for each emoji reaction
 - Configurable newsletter tags for including articles in the newsletter
 - Automatic duplicate detection to prevent saving the same article twice
@@ -57,7 +57,6 @@ Articles with tags listed in NEWSLETTER_TAGS will be included in the newsletter.
 If EMOJI_CONFIGS is not set, it defaults to using the :bookmark: emoji with a standard message and "Read Later" tag.
 
 ## Usage
-The application supports two main modes of operation:
 
 ### 1. Saving URLs to Readwise
 1. Add the Slack bot to your workspace and invite it to the desired channels.
@@ -68,62 +67,75 @@ The application supports two main modes of operation:
    - If it's new, save it to Readwise with the emoji's specific tag
    - Post a custom confirmation message in the thread
 
-### 2. Querying Articles by Tag and Date
-1. Send a message containing a date (e.g., "Show me articles since January 1st" or "Get articles from last week")
-2. React to the message with one of your configured emojis
-3. The bot will:
-   - Extract the date from your message
-   - Query Readwise for all articles tagged with that emoji's label since the specified date
-   - Return a list of articles including:
-     - Title
-     - Added date
-     - Summary
-     - URL (if available)
+### 2. Retrieving Articles
+Use the `/retrieve-articles` command to fetch articles with a specific tag since a given date. The response will only be visible to you.
 
-Example:
+Command format:
 ```
-You: Show me articles since March 1st
-[React with :brain: emoji]
-Bot: Here are the articles tagged with 'Study Material' since 2024-03-01:
-
-*Introduction to Machine Learning*
-Added on: 2024-03-15
-Summary: A comprehensive guide to the basics of machine learning, covering supervised and unsupervised learning...
-URL: https://example.com/ml-intro
-
-*Python Best Practices*
-Added on: 2024-03-10
-Summary: An in-depth look at Python coding standards and best practices...
-URL: https://example.com/python-best-practices
+/retrieve-articles :emoji: date
 ```
+
+The emoji must be one of your configured emojis from EMOJI_CONFIGS. The date can be in various formats:
+
+Examples:
+```
+/retrieve-articles :bookmark: 2024-01-01
+/retrieve-articles :brain: last week
+/retrieve-articles :star: January 1st
+/retrieve-articles :bookmark: 3 days ago
+```
+
+Each example will return all articles tagged with that emoji's label (e.g., "Read Later" for :bookmark:) since the specified date.
+
+The response includes:
+- Article title
+- Date added
+- Summary (truncated if too long)
+- URL
+
+Long responses are automatically split into multiple messages to comply with Slack's message length limits.
 
 ## Installation
 To add the application to Slack, you *must* have deployed the back-end on Railway using the process above.
 
 Once this is complete, you can create an application on your [Slack workspace](https://api.slack.com/) (you will need administrator permissions).
 
-Required Slack Bot Permissions:
+Required Slack Bot Token Scopes (in OAuth & Permissions):
 - **channels:history** - To read message content
 - **chat:write** - To post confirmation messages
 - **reactions:read** - To detect emoji reactions
+- **commands** - To handle slash commands (required for `/retrieve-articles`)
+
+If you're upgrading an existing installation to add the `/retrieve-articles` command:
+1. Go to your app's settings at api.slack.com
+2. Navigate to "OAuth & Permissions"
+3. Under "Scopes", add the "commands" Bot Token Scope
+4. Reinstall the app to your workspace to apply the new scope
 
 Configuration Steps:
 1. Create a new Slack App in your workspace
 2. In "OAuth & Permissions":
-   - Add the required bot permissions listed above
+   - Add all the required bot token scopes listed above
    - Install the app to your workspace
    - Copy the Bot User OAuth Token (this is your SLACK_BOT_TOKEN)
 3. In "Event Subscriptions":
    - Enable events
    - Add your full application URL as the request URL (format: https://your-app.railway.app/slack/events)
    - Subscribe to the "reaction_added" bot event
-4. Get your [Readwise API key](https://readwise.io/access_token)
-5. Add all environment variables to your Railway application
-6. Invite your bot to desired Slack channels
+4. In "Slash Commands":
+   - Create a new command called `/retrieve-articles`
+   - Set the request URL to: https://your-app.railway.app/slack/events
+   - Add a description: "Retrieve articles with a specific tag since a given date"
+   - Add usage hint: ":emoji: date (e.g., :bookmark: 2024-01-01)"
+5. Get your [Readwise API key](https://readwise.io/access_token)
+6. Add all environment variables to your Railway application
+7. Invite your bot to desired Slack channels
 
-Test the integration by reacting to a message containing a URL with one of your configured emojis. You should see:
-- A confirmation message in the Slack thread
-- The article appear in your Readwise Reader with the emoji's specific tag
+Test the integration by:
+1. Reacting to a message containing a URL with one of your configured emojis. You should see:
+   - A confirmation message in the Slack thread
+   - The article appear in your Readwise Reader with the emoji's specific tag
+2. Using the `/retrieve-articles` command with an emoji and date to fetch saved articles. The response will only be visible to you.
 
 ## Local Development
 1. Clone this repository

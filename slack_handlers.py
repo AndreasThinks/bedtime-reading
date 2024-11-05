@@ -2,10 +2,11 @@ import logging
 from slack_bolt.async_app import AsyncApp
 from config import settings
 import requests
-from utils import extract_and_validate_url, get_trigger_emojis, get_emoji_message, get_emoji_configs, extract_date_from_message
+from utils import extract_and_validate_url, get_trigger_emojis, get_emoji_message, get_emoji_configs
 from functools import wraps
 import time
-from datetime import datetime
+from datetime import datetime, date
+import dateparser
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -40,7 +41,7 @@ app = AsyncApp(
 trigger_emojis = get_trigger_emojis()
 deduplicator = EventDeduplicator()
 
-async def get_tagged_articles_since_date(tag: str, since_date) -> list:
+async def get_tagged_articles_since_date(tag: str, since_date: date) -> list:
     """
     Query Readwise API for articles with a specific tag since a given date.
     Returns a list of articles with their titles, summaries, and dates.
@@ -187,6 +188,66 @@ async def check_url_exists(url: str) -> bool:
         logger.error(f"Error checking URL in Readwise: {str(e)}")
         return False
 
+@app.command("/retrieve-articles")
+async def handle_retrieve_command(ack, respond, command):
+    await ack()
+    
+    try:
+        # Parse command text (expected format: "emoji date")
+        parts = command['text'].strip().split(maxsplit=1)
+        if len(parts) != 2:
+            await respond("Please provide both an emoji and a date. Example: `/retrieve-articles :bookmark: 2024-01-01`")
+            return
+
+        emoji, date_str = parts
+        
+        # Remove colons from emoji if present
+        emoji = emoji.strip(':')
+        
+        # Validate emoji
+        emoji_configs = get_emoji_configs()
+        if emoji not in emoji_configs:
+            await respond(f"Invalid emoji. Valid options are: {', '.join([f':{e}:' for e in emoji_configs.keys()])}")
+            return
+        
+        # Parse date
+        parsed_date = dateparser.parse(date_str)
+        if not parsed_date:
+            await respond("Could not parse the date. Please provide a clear date format like '2024-01-01' or 'January 1st'")
+            return
+
+        # Get tag from emoji config
+        tag = emoji_configs[emoji].label
+        
+        # Query articles
+        articles = await get_tagged_articles_since_date(tag, parsed_date.date())
+        
+        if not articles:
+            await respond(f"No articles found with tag '{tag}' since {parsed_date.date()}")
+            return
+        
+        # Format response
+        response = f"Here are the articles tagged with '{tag}' since {parsed_date.date()}:\n\n"
+        for article in articles:
+            response += f"*{article['title']}*\n"
+            response += f"Added on: {article['date']}\n"
+            response += f"Summary: {article['summary']}\n"
+            if article['url']:
+                response += f"URL: {article['url']}\n"
+            response += "\n"
+        
+        # Split message if it's too long for Slack
+        if len(response) > 3000:
+            chunks = [response[i:i+3000] for i in range(0, len(response), 3000)]
+            for chunk in chunks:
+                await respond(chunk)
+        else:
+            await respond(response)
+            
+    except Exception as e:
+        logger.error(f"Error handling retrieve command: {str(e)}")
+        await respond(f"An error occurred: {str(e)}")
+
 @app.event("reaction_added")
 @deduplicator.deduplicate(ttl=60)  # Set TTL to 60 seconds
 async def handle_reaction(event, say, client):
@@ -205,53 +266,6 @@ async def handle_reaction(event, say, client):
         )
         if result.data.get("messages"):
             message = result.data["messages"][0]
-            
-            # Check if the message contains a date
-            date_from_message = extract_date_from_message(message)
-            if date_from_message:
-                # Get emoji configuration to use its label as a tag
-                emoji_configs = get_emoji_configs()
-                emoji_config = emoji_configs.get(reaction)
-                tag = emoji_config.label if emoji_config else "Read Later"
-                
-                # Query articles with the tag since the given date
-                articles = await get_tagged_articles_since_date(tag, date_from_message)
-                
-                if articles:
-                    # Format the response message
-                    response_text = f"Here are the articles tagged with '{tag}' since {date_from_message}:\n\n"
-                    for article in articles:
-                        response_text += f"*{article['title']}*\n"
-                        response_text += f"Added on: {article['date']}\n"
-                        response_text += f"Summary: {article['summary']}\n"
-                        if article['url']:
-                            response_text += f"URL: {article['url']}\n"
-                        response_text += "\n"
-                    
-                    # Split message if it's too long for Slack
-                    if len(response_text) > 3000:
-                        chunks = [response_text[i:i+3000] for i in range(0, len(response_text), 3000)]
-                        for chunk in chunks:
-                            await client.chat_postMessage(
-                                channel=channel_id,
-                                text=chunk,
-                                thread_ts=message_ts
-                            )
-                    else:
-                        await client.chat_postMessage(
-                            channel=channel_id,
-                            text=response_text,
-                            thread_ts=message_ts
-                        )
-                else:
-                    await client.chat_postMessage(
-                        channel=channel_id,
-                        text=f"No articles found with tag '{tag}' since {date_from_message}",
-                        thread_ts=message_ts
-                    )
-                return
-            
-            # If no date in message, proceed with normal URL saving behavior
             url = extract_and_validate_url(message)
             if url:
                 # First, check if the URL already exists
