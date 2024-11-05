@@ -54,24 +54,50 @@ async def get_tagged_articles_since_date(tag: str, since_date: date) -> list:
             url = "https://readwise.io/api/v3/list/"
             params = {
                 'category': 'article',
-                'tags': tag,
-                'updated__gt': since_date.isoformat()  # Add date filter in API request
+                'tags[]': tag,  # Changed from 'tags' to 'tags[]' to match Readwise API format
+                'updated__gt': since_date.isoformat()
             }
             if next_page_cursor:
                 params['pageCursor'] = next_page_cursor
+
+            logger.info(f"Querying Readwise API with params: {params}")  # Add logging for debugging
 
             response = requests.get(
                 url,
                 headers={"Authorization": f"Token {settings.READWISE_API_KEY}"},
                 params=params,
-                timeout=10  # Add timeout
+                timeout=10
             )
             response.raise_for_status()
             data = response.json()
 
+            # Log the response for debugging
+            logger.info(f"Received response from Readwise API with {len(data.get('results', []))} results")
+
+            # Check if data and results exist
+            if not data or 'results' not in data:
+                logger.error("Invalid response format from Readwise API")
+                break
+
+            results = data.get('results', [])
+            if not results:  # If results is None or empty
+                break
+
             # Process articles
-            for article in data.get('results', []):
-                created_at = datetime.fromisoformat(article.get('created_at').replace('Z', '+00:00'))
+            for article in results:
+                if not article:  # Skip if article is None
+                    continue
+                    
+                # Check if the article has the specified tag
+                article_tags = article.get('tags', [])
+                if not article_tags or tag not in [t.get('name') for t in article_tags]:
+                    continue
+
+                created_at = article.get('created_at')
+                if not created_at:  # Skip if no creation date
+                    continue
+                    
+                created_at_dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
                 summary = article.get('summary', 'No summary available')
                 # Truncate summary if it's too long for Slack
                 if len(summary) > 500:
@@ -80,7 +106,7 @@ async def get_tagged_articles_since_date(tag: str, since_date: date) -> list:
                 articles.append({
                     'title': article.get('title', 'No title'),
                     'summary': summary,
-                    'date': created_at.strftime('%Y-%m-%d'),
+                    'date': created_at_dt.strftime('%Y-%m-%d'),
                     'url': article.get('source_url', '')
                 })
 
