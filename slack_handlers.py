@@ -53,7 +53,7 @@ async def get_tagged_articles_since_date(tag: str, since_date: date) -> list:
         try:
             url = "https://readwise.io/api/v3/list/"
             params = {
-                'updatedAfter': since_date.isoformat()
+                'updatedAfter': since_date.isoformat() + 'T00:00:00Z'  # Convert to ISO 8601 format with UTC timezone
             }
             if next_page_cursor:
                 params['pageCursor'] = next_page_cursor
