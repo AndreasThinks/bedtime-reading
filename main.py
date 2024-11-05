@@ -570,14 +570,14 @@ async def slack_events(req: Request):
                 )
         
         # Verify request is from Slack
-        if not await handler.verify_request(req):
+        body = await req.json()
+        if not await slack_app.async_client.verify_request(req.headers, await req.body()):
             logger.warning("Invalid request signature")
             return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 content={"error": "Invalid request signature"}
             )
         
-        body = await req.json()
         logger.info(f"Received Slack event: {body}")
         
         # Handle URL verification
@@ -612,7 +612,7 @@ async def handle_retrieve_articles(req: Request):
                 )
         
         # Verify request is from Slack
-        if not await handler.verify_request(req):
+        if not await slack_app.async_client.verify_request(req.headers, await req.body()):
             logger.warning("Invalid request signature")
             return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
