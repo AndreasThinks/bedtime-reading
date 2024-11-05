@@ -1,11 +1,10 @@
 import re
 import logging
-from typing import Optional, List
+from typing import Optional, List, Dict
 from urllib.parse import urlparse
 from limits.storage import MemoryStorage
 from limits.strategies import MovingWindowRateLimiter
-
-from config import settings
+from config import settings, EmojiConfig
 
 def setup_logging():
     logging.basicConfig(
@@ -15,20 +14,24 @@ def setup_logging():
     )
 
     # Reduce logging for some verbose libraries
-    # TODO decide if we want to add these back
-    # logging.getLogger('httpx').setLevel(logging.WARNING)
     logging.getLogger('slack_bolt').setLevel(logging.WARNING)
     return logging.getLogger(__name__)
-
-
 
 def setup_rate_limiter():
     return MovingWindowRateLimiter(MemoryStorage())
 
-def get_trigger_emojis() -> Optional[List[str]]:
-    if settings.TRIGGER_EMOJIS:
-        return [emoji.strip() for emoji in settings.TRIGGER_EMOJIS.split(',')]
-    return None
+def get_emoji_configs() -> Dict[str, EmojiConfig]:
+    """Get the emoji configurations from settings."""
+    return settings.EMOJI_CONFIGS
+
+def get_trigger_emojis() -> List[str]:
+    """Get list of trigger emoji names from the configurations."""
+    return list(settings.EMOJI_CONFIGS.keys())
+
+def get_emoji_message(emoji: str) -> str:
+    """Get the custom message for a specific emoji."""
+    config = settings.EMOJI_CONFIGS.get(emoji)
+    return config.message if config else "Saved article to your reading list"
 
 def sanitize_url(url: str) -> str:
     # Remove any trailing '>' characters and whitespace

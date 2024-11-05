@@ -2,7 +2,7 @@ import logging
 from slack_bolt.async_app import AsyncApp
 from config import settings
 import requests
-from utils import extract_and_validate_url, get_trigger_emojis
+from utils import extract_and_validate_url, get_trigger_emojis, get_emoji_message
 from functools import wraps
 import time
 
@@ -125,8 +125,10 @@ async def check_url_exists(url: str) -> bool:
 @app.event("reaction_added")
 @deduplicator.deduplicate(ttl=60)  # Set TTL to 60 seconds
 async def handle_reaction(event, say, client):
-    if trigger_emojis is not None and event['reaction'] not in trigger_emojis:
+    reaction = event['reaction']
+    if reaction not in trigger_emojis:
         return
+
     channel_id = event["item"]["channel"]
     message_ts = event["item"]["ts"]
     try:
@@ -149,7 +151,9 @@ async def handle_reaction(event, say, client):
                     # If the URL doesn't exist, save it
                     success, result = await save_url_to_readwise(url)
                     if success:
-                        reply_text = f"Saved URL to Readwise Reader with tag '{settings.DOCUMENT_TAG}': {result}"
+                        # Get custom message for the specific emoji
+                        custom_message = get_emoji_message(reaction)
+                        reply_text = f"{custom_message}: {result}"
                         await client.chat_postMessage(
                             channel=channel_id,
                             text=reply_text,

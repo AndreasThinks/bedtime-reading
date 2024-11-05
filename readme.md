@@ -1,48 +1,78 @@
-# Slack Omnivore Integration
+# Slack Readwise Integration
 
-This application integrates Slack with Omnivore, allowing you to save URLs shared in Slack to your Omnivore account, along with a pretty front-end website.
+This application integrates Slack with Readwise Reader, allowing you to save URLs shared in Slack to your Readwise account with customizable reactions and messages.
 
 [![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/AzS2fY?referralCode=mOVLfw)
 
 ## Features
-- Saves URLs shared in Slack to Omnivore when specific emoji reactions are added
-- Configurable trigger emojis
-- Applies custom labels to saved articles
+- Save URLs shared in Slack to Readwise Reader when specific emoji reactions are added
+- Configurable emoji reactions with custom labels and messages
+- Automatic duplicate detection to prevent saving the same article twice
 - Configurable rate limiting
 - Secure handling of environment variables
 
 ## Deployment
-Click the "Deploy to Heroku" button above to start the deployment process. Don't worry if you don't have all of these yet, you'll get the rest after deploying your Slack App.
+Click the "Deploy to Railway" button above to start the deployment process. Don't worry if you don't have all of these yet, you'll get the rest after deploying your Slack App.
 
+Required Environment Variables:
 - `SLACK_BOT_TOKEN`: Your Slack Bot Token
 - `SLACK_SIGNING_SECRET`: Your Slack Signing Secret
-- `OMNIVORE_API_KEY`: Your Omnivore API Key
-- `ALLOWED_HOSTS`: Comma-separated list of allowed hosts (e.g., your-app-name.herokuapp.com)
-- `OMNIVORE_LABEL`: (Optional) Label to apply to saved articles in Omnivore (default: "slack-import")
-- `RATE_LIMIT_PER_MINUTE`: (Optional) Number of requests allowed per minute (default: 3)
-- `TRIGGER_EMOJIS`: (Optional) Comma-separated list of emojis that trigger the bot (e.g., "bookmark,star,heart"). If not set, the bot will respond to any emoji reaction.
+- `READWISE_API_KEY`: Your Readwise API Key
+- `ALLOWED_HOSTS`: Comma-separated list of allowed hosts (e.g., your-app-name.railway.app)
+
+Optional Environment Variables:
+- `DOCUMENT_TAG`: Tag to apply to saved articles in Readwise (default: "slack-import")
+- `RATE_LIMIT_PER_MINUTE`: Number of requests allowed per minute (default: 20)
+- `EMOJI_CONFIGS`: Configuration for emoji reactions in the format "emoji1:label1:message1;emoji2:label2:message2"
+
+Example Emoji Configuration:
+```
+EMOJI_CONFIGS=bookmark:Read Later:📚 Added to your reading list;brain:Study Material:🧠 Saved as study material - don't forget to add highlights!;star:Must Read:⭐ Marked as must-read priority article
+```
+
+This creates three different reactions:
+1. :bookmark: - For general articles to read later
+2. :brain: - For study materials that need highlighting
+3. :star: - For high-priority must-read articles
+
+If EMOJI_CONFIGS is not set, it defaults to using the :bookmark: emoji with a standard message.
 
 ## Usage
 1. Add the Slack bot to your workspace and invite it to the desired channels.
-2. When a message containing a URL is posted, react to it with one of the specified emojis (or any emoji if `TRIGGER_EMOJIS` is not set).
-3. The bot will extract the URL, save it to Omnivore with the specified label, and post a confirmation message in the thread.
+2. When a message containing a URL is posted, react to it with one of your configured emojis.
+3. The bot will:
+   - Extract the URL from the message
+   - Check if it's already saved in Readwise
+   - If it's new, save it to Readwise with your configured tag
+   - Post a custom confirmation message (based on the emoji used) in the thread
 
 ## Installation
-To add the application to Slack, you *must* have deployed the back-end on Heroku using the process above.
+To add the application to Slack, you *must* have deployed the back-end on Railway using the process above.
 
-Once this is complete, you can create an application on your [Slack workspace](https://api.slack.com/) (you will need administrator permissions). You can either use our [Slack Manifest](manifest.json), or follow the manual steps below.
+Once this is complete, you can create an application on your [Slack workspace](https://api.slack.com/) (you will need administrator permissions).
 
-- In the "oAuth & Permissions" section, enable **channels:history**, **chat:write** and **reactions:read**, and obtain your SLACK_BOT_TOKEN.
-- In the "Event Subscriptions" section, add "reaction_added" to bot events
+Required Slack Bot Permissions:
+- **channels:history** - To read message content
+- **chat:write** - To post confirmation messages
+- **reactions:read** - To detect emoji reactions
 
-Once your bot has been installed, follow the configuration steps below.
+Configuration Steps:
+1. Create a new Slack App in your workspace
+2. In "OAuth & Permissions":
+   - Add the required bot permissions listed above
+   - Install the app to your workspace
+   - Copy the Bot User OAuth Token (this is your SLACK_BOT_TOKEN)
+3. In "Event Subscriptions":
+   - Enable events
+   - Add your full application URL as the request URL (format: https://your-app.railway.app/slack/events)
+   - Subscribe to the "reaction_added" bot event
+4. Get your [Readwise API key](https://readwise.io/access_token)
+5. Add all environment variables to your Railway application
+6. Invite your bot to desired Slack channels
 
-- In the "Event Subscriptions" section, add your full Heroku application URL (in the format https://your-heroku-app.herokuapp.com/slack/events) as the request URL. 
-- If you do not already have one, create an [Omnivore](https://omnivore.app/) account, and [get an API key](https://omnivore.app/settings/api).
-- From the Heroku web-interface, add all environment variables to your application.
-- From within your Slack client, add your bot to a channel by sending them a DM
-
-That's it!  Test it by reacting to a post with a valid URL. You should be able to see the event in your Heroku logs, and it will appear in your Omnivore library.
+Test the integration by reacting to a message containing a URL with one of your configured emojis. You should see:
+- A confirmation message in the Slack thread
+- The article appear in your Readwise Reader
 
 ## Local Development
 1. Clone this repository

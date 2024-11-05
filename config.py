@@ -1,6 +1,6 @@
 import os
 from typing import List, Any, Dict, Tuple, Optional
-from pydantic import Field
+from pydantic import Field, BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict, PydanticBaseSettingsSource
 
 def parse_allowed_hosts(v: Any) -> List[str]:
@@ -10,12 +10,47 @@ def parse_allowed_hosts(v: Any) -> List[str]:
         return v
     return ["localhost", "127.0.0.1"]  # Default value
 
+class EmojiConfig(BaseModel):
+    emoji: str
+    label: str
+    message: str
+
+def parse_emoji_config(v: Any) -> Dict[str, EmojiConfig]:
+    if not v:
+        return {
+            "bookmark": EmojiConfig(
+                emoji="bookmark",
+                label="Read Later",
+                message="Saved article to your reading list"
+            )
+        }
+    
+    try:
+        # Format: emoji1:label1:message1;emoji2:label2:message2
+        configs = {}
+        for config_str in v.split(';'):
+            if not config_str.strip():
+                continue
+            emoji, label, message = [part.strip() for part in config_str.split(':')]
+            configs[emoji] = EmojiConfig(emoji=emoji, label=label, message=message)
+        return configs
+    except:
+        return {
+            "bookmark": EmojiConfig(
+                emoji="bookmark",
+                label="Read Later",
+                message="Saved article to your reading list"
+            )
+        }
+
 class EnvSettingsSource(PydanticBaseSettingsSource):
     def get_field_value(self, field: str, field_info: Any) -> Tuple[Any, str, bool]:
         env_val = os.getenv(field)
         if env_val is not None:
             if field == "ALLOWED_HOSTS":
                 return parse_allowed_hosts(env_val), field, True
+            if field == "EMOJI_CONFIGS":
+                return parse_emoji_config(env_val), field, True
             return env_val, field, True
         return None, field, False
 
@@ -39,7 +74,15 @@ class Settings(BaseSettings):
     DOCUMENT_TAG: str = Field(default="slack-import")  # Tag for imported documents
     RATE_LIMIT_PER_MINUTE: int = Field(default=20)
     LOG_LEVEL: str = Field(default="INFO")
-    TRIGGER_EMOJIS: Optional[str] = None  # New setting for trigger emojis
+    EMOJI_CONFIGS: Dict[str, EmojiConfig] = Field(
+        default_factory=lambda: {
+            "bookmark": EmojiConfig(
+                emoji="bookmark",
+                label="Read Later",
+                message="Saved article to your reading list"
+            )
+        }
+    )
     MINIMUM_ITEM_COUNT: int = Field(default=14)
     MAXIMUM_ITEM_COUNT: int = Field(default=20)  # Maximum number of articles to retrieve
     NUMBER_OF_LONG_ARTICLES: int = Field(default=4)
