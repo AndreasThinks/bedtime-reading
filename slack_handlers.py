@@ -53,13 +53,12 @@ async def get_tagged_articles_since_date(tag: str, since_date: date) -> list:
         try:
             url = "https://readwise.io/api/v3/list/"
             params = {
-                'tags': '[' + tag + ']', 
-                'updated__gt': since_date.isoformat()
+                'updatedAfter': since_date.isoformat()
             }
             if next_page_cursor:
                 params['pageCursor'] = next_page_cursor
 
-            logger.info(f"Querying Readwise API with params: {params}")  # Add logging for debugging
+            logger.info(f"Querying Readwise API with params: {params}")
 
             response = requests.get(
                 url,
@@ -89,7 +88,7 @@ async def get_tagged_articles_since_date(tag: str, since_date: date) -> list:
                     
                 # Check if the article has the specified tag
                 article_tags = article.get('tags', [])
-                if not article_tags or tag not in [t.get('name') for t in article_tags]:
+                if not article_tags or tag not in article_tags:
                     continue
 
                 created_at = article.get('created_at')
