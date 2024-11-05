@@ -9,6 +9,7 @@ from tqdm import tqdm
 from dotenv import load_dotenv
 import logging
 import re
+import time
 
 import subprocess
 from fasthtml.common import database
@@ -39,6 +40,50 @@ if items not in db.t:
     comparisons.create(id=int, winning_id=int, losing_id=int, pk='id')
     last_update.create(id=int, update_date=str, pk='id')
     newsletter_summaries.create(id=int, date=str, summary=str, pk='id')
+
+class WallabagClient:
+    def __init__(self):
+        self.access_token = None
+        self.token_expires = 0
+        self.base_url = settings.WALLABAG_URL.rstrip('/')
+
+    def get_token(self):
+        """Get or refresh the Wallabag access token."""
+        current_time = time.time()
+        if self.access_token and current_time < self.token_expires:
+            return self.access_token
+
+        try:
+            response = requests.post(
+                f"{self.base_url}/oauth/v2/token",
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded"
+                },
+                data={
+                    "grant_type": "password",
+                    "client_id": settings.WALLABAG_CLIENT_ID,
+                    "client_secret": settings.WALLABAG_CLIENT_SECRET,
+                    "username": settings.WALLABAG_USERNAME,
+                    "password": settings.WALLABAG_PASSWORD
+                },
+                timeout=10
+            )
+            response.raise_for_status()
+            data = response.json()
+            self.access_token = data["access_token"]
+            self.token_expires = current_time + data["expires_in"] - 300  # Refresh 5 minutes before expiry
+            return self.access_token
+        except Exception as e:
+            logger.error(f"Error getting Wallabag token: {str(e)}")
+            raise
+
+    def get_headers(self):
+        """Get headers with current access token."""
+        token = self.get_token()
+        return {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
 
 def cleanup_invalid_articles():
     """Remove any articles from the database that don't have valid summaries."""
@@ -97,105 +142,97 @@ def update_items_from_csv():
     set_last_update_date(datetime.now().date())
     logger.info("CSV update complete")
 
-def query_recent_readwise_articles(initial_days=None, limit=None):
-    logger.info("Querying recent Readwise articles")
-    api_token = os.getenv("READWISE_API_KEY")
-    base_url = "https://readwise.io/api/v3/list/"
+def query_recent_wallabag_articles(initial_days=None, limit=None):
+    logger.info("Querying recent Wallabag articles")
+    wallabag_client = WallabagClient()
     
     if initial_days is None:
         initial_days = days_to_check
     if limit is None:
         limit = maximum_item_count
     
-    headers = {
-        "Authorization": f"Token {api_token}",
-        "Content-Type": "application/json"
-    }
-    
     try:
         existing_urls = get_existing_urls()
         logger.debug(f"Found {len(existing_urls)} existing URLs in database")
         
         cutoff_date = datetime.now(pytz.utc) - timedelta(days=initial_days)
-        cutoff_date_str = cutoff_date.isoformat()
+        headers = wallabag_client.get_headers()
         
         articles = []
-        next_page_cursor = None
+        page = 1
         new_articles_found = 0
         
         while True:
-            params = {
-                'updatedAfter': cutoff_date_str,
-                'location': 'new'
-            }
-            
-            if next_page_cursor:
-                params['pageCursor'] = next_page_cursor
-            
-            response = requests.get(base_url, headers=headers, params=params)
+            response = requests.get(
+                f"{wallabag_client.base_url}/api/entries",
+                headers=headers,
+                params={
+                    'since': int(cutoff_date.timestamp()),
+                    'page': page,
+                    'perPage': 100,
+                    'tags[]': settings.NEWSLETTER_TAG
+                },
+                timeout=10
+            )
             response.raise_for_status()
             data = response.json()
             
-            for article in data['results']:
-                tags = article.get('tags', [])
-                if tags is None:
-                    tags = []
-                if (settings.DOCUMENT_TAG in tags and 
-                    article['url'] not in existing_urls and 
-                    article.get('category') != 'highlight'):
+            if not data.get('_embedded', {}).get('items'):
+                break
+                
+            for article in data['_embedded']['items']:
+                if article['url'] not in existing_urls:
                     articles.append({
                         "title": article['title'],
                         "url": article['url'],
-                        "content": article.get('text', ''),
-                        "saved_at": article['saved_at'],
-                        "api_summary": article.get('summary', '')  # Get the summary from the API
+                        "content": article.get('content', ''),
+                        "saved_at": datetime.fromtimestamp(article['created_at']).isoformat(),
+                        "api_summary": ""  # Wallabag doesn't provide summaries
                     })
                     new_articles_found += 1
                     logger.debug(f"Found new article: {article['title']}")
             
-            if len(articles) >= limit or not data.get('nextPageCursor'):
+            if len(articles) >= limit or page >= data.get('pages', 1):
                 break
                 
-            next_page_cursor = data['nextPageCursor']
+            page += 1
         
         current_days = initial_days
         while len(articles) < minimum_item_count and current_days < maximum_days_to_check:
             logger.debug(f"Not enough articles, extending search to {current_days + days_to_check} days")
             current_days += days_to_check
             cutoff_date = datetime.now(pytz.utc) - timedelta(days=current_days)
-            cutoff_date_str = cutoff_date.isoformat()
             
-            params = {
-                'updatedAfter': cutoff_date_str,
-                'location': 'new'
-            }
-            
-            response = requests.get(base_url, headers=headers, params=params)
+            response = requests.get(
+                f"{wallabag_client.base_url}/api/entries",
+                headers=headers,
+                params={
+                    'since': int(cutoff_date.timestamp()),
+                    'page': 1,
+                    'perPage': 100,
+                    'tags[]': settings.NEWSLETTER_TAG
+                },
+                timeout=10
+            )
             response.raise_for_status()
             data = response.json()
             
-            for article in data['results']:
-                if tags is None:
-                    tags = []
-                if (settings.DOCUMENT_TAG in tags and 
-                    article['url'] not in existing_urls and 
-                    article.get('category') != 'highlight'):
-                    articles.append({
-                        "title": article['title'],
-                        "url": article['url'],
-                        "content": article.get('text', ''),
-                        "saved_at": article['saved_at'],
-                        "api_summary": article.get('summary', '')  # Get the summary from the API
-                    })
-                    new_articles_found += 1
-                    logger.debug(f"Found new article: {article['title']}")
-                
-                if len(articles) >= limit:
-                    break
+            if data.get('_embedded', {}).get('items'):
+                for article in data['_embedded']['items']:
+                    if article['url'] not in existing_urls:
+                        articles.append({
+                            "title": article['title'],
+                            "url": article['url'],
+                            "content": article.get('content', ''),
+                            "saved_at": datetime.fromtimestamp(article['created_at']).isoformat(),
+                            "api_summary": ""  # Wallabag doesn't provide summaries
+                        })
+                        new_articles_found += 1
+                        logger.debug(f"Found new article: {article['title']}")
+                    
+                    if len(articles) >= limit:
+                        break
             
-            if not data.get('nextPageCursor'):
-                break
-        
         if len(articles) < minimum_item_count:
             logger.warning(f"Only found {len(articles)} new articles, minimum required is {minimum_item_count}")
         
@@ -203,8 +240,8 @@ def query_recent_readwise_articles(initial_days=None, limit=None):
         logger.info(f"Found {new_articles_found} new articles in total")
         return articles[:maximum_item_count]
         
-    except requests.RequestException as e:
-        logger.error(f"Error querying Readwise API: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error querying Wallabag API: {str(e)}")
         return []
 
 def extract_json_from_response(response_text):
@@ -248,14 +285,11 @@ def generate_article_summary(title, url, content, api_summary="", num_comparison
             losing_item = items[comparison['losing_id']]
             comparison_examples += f"\nPreferred article:\nTitle: {winning_item['title']}\n{winning_item['short_summary'][:100]}...\n\nOver this article:\nTitle: {losing_item['title']}\n{losing_item['short_summary'][:100]}...\n"
 
-    api_summary_text = f"\nAPI-provided summary:\n{api_summary}" if api_summary else ""
-
     prompt = f"""
     Analyze the following article and provide a summary in JSON format. You must respond with ONLY valid JSON, no other text:
 
     Title: {title}
     URL: {url}
-    {api_summary_text}
 
     Content:
     {content[:1500]}
@@ -268,7 +302,6 @@ def generate_article_summary(title, url, content, api_summary="", num_comparison
     For the summaries:
     - The short_summary should be 2-3 sentences that capture the main points and key insights
     - The long_summary should be 5-6 sentences that provide a comprehensive overview, including context, key findings, and implications
-    - If an API summary is provided, use it to enhance your summary but ensure you maintain the required format and length
 
     Respond with ONLY the following JSON format, no other text:
     {{
@@ -377,7 +410,7 @@ def process_articles():
     # First, clean up any invalid articles
     cleanup_invalid_articles()
     
-    articles = query_recent_readwise_articles()
+    articles = query_recent_wallabag_articles()
     if not articles:
         logger.info("No new articles to process")
         return []
@@ -389,8 +422,7 @@ def process_articles():
         summary = generate_article_summary(
             article['title'], 
             article['url'], 
-            article['content'],
-            article.get('api_summary', '')  # Pass the API summary if available
+            article['content']
         )
         if summary:  # Only add articles with successful summaries
             processed_data.append({

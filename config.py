@@ -1,5 +1,5 @@
 import os
-from typing import List, Any, Dict, Tuple, Optional, Set
+from typing import List, Any, Dict, Tuple, Optional
 from pydantic import Field, BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict, PydanticBaseSettingsSource
 
@@ -43,12 +43,6 @@ def parse_emoji_config(v: Any) -> Dict[str, EmojiConfig]:
             )
         }
 
-def parse_newsletter_tags(v: Any) -> Set[str]:
-    """Parse comma-separated newsletter tags into a set."""
-    if not v:
-        return {"Newsletter"}  # Default to including only "Newsletter" tag
-    return {tag.strip() for tag in v.split(',') if tag.strip()}
-
 class EnvSettingsSource(PydanticBaseSettingsSource):
     def get_field_value(self, field: str, field_info: Any) -> Tuple[Any, str, bool]:
         env_val = os.getenv(field)
@@ -57,8 +51,6 @@ class EnvSettingsSource(PydanticBaseSettingsSource):
                 return parse_allowed_hosts(env_val), field, True
             if field == "EMOJI_CONFIGS":
                 return parse_emoji_config(env_val), field, True
-            if field == "NEWSLETTER_TAGS":
-                return parse_newsletter_tags(env_val), field, True
             return env_val, field, True
         return None, field, False
 
@@ -89,9 +81,7 @@ class Settings(BaseSettings):
             )
         }
     )
-    NEWSLETTER_TAGS: Set[str] = Field(
-        default_factory=lambda: {"Newsletter"}
-    )
+    NEWSLETTER_TAG: str = Field(default="Newsletter")
     MINIMUM_ITEM_COUNT: int = Field(default=14)
     MAXIMUM_ITEM_COUNT: int = Field(default=20)  # Maximum number of articles to retrieve
     NUMBER_OF_LONG_ARTICLES: int = Field(default=4)
