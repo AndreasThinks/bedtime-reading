@@ -5,7 +5,7 @@ import requests
 from utils import extract_and_validate_url, get_trigger_emojis, get_emoji_message, get_emoji_configs
 from functools import wraps
 import time
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import dateparser
 
 logger = logging.getLogger(__name__)
@@ -54,7 +54,8 @@ async def get_tagged_articles_since_date(tag: str, since_date: date) -> list:
             url = "https://readwise.io/api/v3/list/"
             params = {
                 'category': 'article',
-                'tags': tag
+                'tags': tag,
+                'updated__gt': since_date.isoformat()  # Add date filter in API request
             }
             if next_page_cursor:
                 params['pageCursor'] = next_page_cursor
@@ -62,7 +63,8 @@ async def get_tagged_articles_since_date(tag: str, since_date: date) -> list:
             response = requests.get(
                 url,
                 headers={"Authorization": f"Token {settings.READWISE_API_KEY}"},
-                params=params
+                params=params,
+                timeout=10  # Add timeout
             )
             response.raise_for_status()
             data = response.json()
@@ -70,22 +72,17 @@ async def get_tagged_articles_since_date(tag: str, since_date: date) -> list:
             # Process articles
             for article in data.get('results', []):
                 created_at = datetime.fromisoformat(article.get('created_at').replace('Z', '+00:00'))
-                if created_at.date() >= since_date:
-                    summary = article.get('summary', 'No summary available')
-                    # Truncate summary if it's too long for Slack
-                    if len(summary) > 500:
-                        summary = summary[:497] + "..."
+                summary = article.get('summary', 'No summary available')
+                # Truncate summary if it's too long for Slack
+                if len(summary) > 500:
+                    summary = summary[:497] + "..."
 
-                    articles.append({
-                        'title': article.get('title', 'No title'),
-                        'summary': summary,
-                        'date': created_at.strftime('%Y-%m-%d'),
-                        'url': article.get('source_url', '')
-                    })
-                elif created_at.date() < since_date:
-                    # Since results are ordered by date, if we find an article older than since_date,
-                    # we can stop paginating
-                    return articles
+                articles.append({
+                    'title': article.get('title', 'No title'),
+                    'summary': summary,
+                    'date': created_at.strftime('%Y-%m-%d'),
+                    'url': article.get('source_url', '')
+                })
 
             # Check if there are more pages
             next_page_cursor = data.get('nextPageCursor')
@@ -94,6 +91,9 @@ async def get_tagged_articles_since_date(tag: str, since_date: date) -> list:
 
         except requests.RequestException as e:
             logger.error(f"Error querying Readwise API: {str(e)}")
+            break
+        except Exception as e:
+            logger.error(f"Unexpected error querying Readwise API: {str(e)}")
             break
 
     return articles
@@ -122,7 +122,8 @@ async def save_url_to_readwise(url: str, emoji: str) -> tuple[bool, str]:
                 "tags": [tag],  # Only use the emoji's label as the tag
                 "location": "new",  # Save to "new" items
                 "saved_using": "slack-readwise-integration"  # Identify our app
-            }
+            },
+            timeout=10  # Add timeout
         )
         
         # Check response status
@@ -164,7 +165,8 @@ async def check_url_exists(url: str) -> bool:
                 headers={
                     "Authorization": f"Token {settings.READWISE_API_KEY}"
                 },
-                params=params
+                params=params,
+                timeout=10  # Add timeout
             )
             response.raise_for_status()
             data = response.json()
@@ -190,13 +192,17 @@ async def check_url_exists(url: str) -> bool:
 
 @app.command("/retrieve-articles")
 async def handle_retrieve_command(ack, respond, command):
+    """Handle the /retrieve-articles slash command."""
     await ack()
     
     try:
         # Parse command text (expected format: "emoji date")
         parts = command['text'].strip().split(maxsplit=1)
         if len(parts) != 2:
-            await respond("Please provide both an emoji and a date. Example: `/retrieve-articles :bookmark: 2024-01-01`")
+            await respond({
+                "response_type": "ephemeral",
+                "text": "Please provide both an emoji and a date. Example: `/retrieve-articles :bookmark: 2024-01-01`"
+            })
             return
 
         emoji, date_str = parts
@@ -207,46 +213,99 @@ async def handle_retrieve_command(ack, respond, command):
         # Validate emoji
         emoji_configs = get_emoji_configs()
         if emoji not in emoji_configs:
-            await respond(f"Invalid emoji. Valid options are: {', '.join([f':{e}:' for e in emoji_configs.keys()])}")
+            await respond({
+                "response_type": "ephemeral",
+                "text": f"Invalid emoji. Valid options are: {', '.join([f':{e}:' for e in emoji_configs.keys()])}"
+            })
             return
         
         # Parse date
         parsed_date = dateparser.parse(date_str)
         if not parsed_date:
-            await respond("Could not parse the date. Please provide a clear date format like '2024-01-01' or 'January 1st'")
+            await respond({
+                "response_type": "ephemeral",
+                "text": "Could not parse the date. Please provide a clear date format like '2024-01-01' or 'January 1st'"
+            })
+            return
+
+        # Validate date is not in the future
+        if parsed_date.date() > date.today():
+            await respond({
+                "response_type": "ephemeral",
+                "text": "The date cannot be in the future."
+            })
+            return
+
+        # Validate date is not too far in the past (e.g., more than 1 year)
+        if parsed_date.date() < date.today() - timedelta(days=365):
+            await respond({
+                "response_type": "ephemeral",
+                "text": "Please select a date within the last year."
+            })
             return
 
         # Get tag from emoji config
         tag = emoji_configs[emoji].label
         
+        # Show initial response
+        await respond({
+            "response_type": "in_channel",
+            "text": f"Retrieving articles tagged with '{tag}' since {parsed_date.date()}..."
+        })
+        
         # Query articles
         articles = await get_tagged_articles_since_date(tag, parsed_date.date())
         
         if not articles:
-            await respond(f"No articles found with tag '{tag}' since {parsed_date.date()}")
+            await respond({
+                "response_type": "in_channel",
+                "text": f"No articles found with tag '{tag}' since {parsed_date.date()}"
+            })
             return
         
         # Format response
-        response = f"Here are the articles tagged with '{tag}' since {parsed_date.date()}:\n\n"
+        blocks = [{
+            "type": "header",
+            "text": {
+                "type": "plain_text",
+                "text": f"Articles tagged with '{tag}' since {parsed_date.date()}"
+            }
+        }]
+
         for article in articles:
-            response += f"*{article['title']}*\n"
-            response += f"Added on: {article['date']}\n"
-            response += f"Summary: {article['summary']}\n"
-            if article['url']:
-                response += f"URL: {article['url']}\n"
-            response += "\n"
-        
-        # Split message if it's too long for Slack
-        if len(response) > 3000:
-            chunks = [response[i:i+3000] for i in range(0, len(response), 3000)]
-            for chunk in chunks:
-                await respond(chunk)
-        else:
-            await respond(response)
+            blocks.extend([
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"*{article['title']}*\nAdded on: {article['date']}\n{article['summary']}"
+                    }
+                },
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"<{article['url']}|Read article>"
+                    }
+                },
+                {"type": "divider"}
+            ])
+
+        # Split message if it's too many blocks for Slack
+        max_blocks = 50
+        for i in range(0, len(blocks), max_blocks):
+            chunk = blocks[i:i + max_blocks]
+            await respond({
+                "response_type": "in_channel",
+                "blocks": chunk
+            })
             
     except Exception as e:
         logger.error(f"Error handling retrieve command: {str(e)}")
-        await respond(f"An error occurred: {str(e)}")
+        await respond({
+            "response_type": "ephemeral",
+            "text": f"An error occurred: {str(e)}"
+        })
 
 @app.event("reaction_added")
 @deduplicator.deduplicate(ttl=60)  # Set TTL to 60 seconds

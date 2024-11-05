@@ -1,6 +1,6 @@
 from fasthtml import FastHTML
 from fasthtml.common import fast_app, NotStr, Form, Head, Picture, Hidden, HTMLResponse, serve, database, Div, Card, MarkdownJS, A, Html, H3, Title, Body, Img, Titled, Article, Header, P, Footer, Main, H1, Style, picolink, H2, Ul, Li, Script, Button
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, status
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
@@ -24,7 +24,7 @@ limiter = setup_rate_limiter()
 rate_limits = parse_many(settings.RATE_LIMIT)
 handler = AsyncSlackRequestHandler(slack_app)
 
-
+# Database collections
 items = db.t.items
 comparisons = db.t.comparisons
 last_update = db.t.last_update
@@ -563,8 +563,19 @@ async def slack_events(req: Request):
         # Check rate limits
         for rate_limit in rate_limits:
             if not limiter.hit(rate_limit, "global", req.client.host):
-                logger.warning("Rate limit exceeded")
-                raise HTTPException(status_code=429, detail="Too many requests")
+                logger.warning(f"Rate limit exceeded from {req.client.host}")
+                return JSONResponse(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    content={"error": "Too many requests"}
+                )
+        
+        # Verify request is from Slack
+        if not await handler.verify_request(req):
+            logger.warning("Invalid request signature")
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content={"error": "Invalid request signature"}
+            )
         
         body = await req.json()
         logger.info(f"Received Slack event: {body}")
@@ -573,10 +584,20 @@ async def slack_events(req: Request):
         if body.get("type") == "url_verification":
             return {"challenge": body["challenge"]}
         
+        # Handle the event with the Slack handler
         return await handler.handle(req)
+    except json.JSONDecodeError:
+        logger.error("Invalid JSON in request body")
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"error": "Invalid JSON"}
+        )
     except Exception as e:
         logger.error(f"Error handling Slack event: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail="An error occurred processing the Slack event")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"error": "An internal server error occurred"}
+        )
     
 @app.post("/slack/retrieve-articles")
 async def handle_retrieve_articles(req: Request):
@@ -584,17 +605,43 @@ async def handle_retrieve_articles(req: Request):
         # Check rate limits
         for rate_limit in rate_limits:
             if not limiter.hit(rate_limit, "global", req.client.host):
-                logger.warning("Rate limit exceeded")
-                raise HTTPException(status_code=429, detail="Too many requests")
+                logger.warning(f"Rate limit exceeded from {req.client.host}")
+                return JSONResponse(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    content={"error": "Too many requests"}
+                )
         
-        # Get form data
+        # Verify request is from Slack
+        if not await handler.verify_request(req):
+            logger.warning("Invalid request signature")
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content={"error": "Invalid request signature"}
+            )
+        
+        # Get form data and validate
         form_data = await req.form()
-        logger.info(f"Received retrieve-articles command: {form_data}")
+        command = form_data.get("command")
+        text = form_data.get("text")
+        
+        if not command or not text:
+            logger.error("Missing required command parameters")
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={"error": "Missing required parameters"}
+            )
+            
+        logger.info(f"Received retrieve-articles command: {command} {text}")
         
         # Pass to handler
         return await handler.handle(req)
     except Exception as e:
         logger.error(f"Error handling retrieve-articles command: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail="An error occurred processing the command")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"error": "An internal server error occurred"}
+        )
+
+# Rest of the code remains the same...
 
 serve()
