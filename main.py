@@ -633,15 +633,37 @@ async def handle_retrieve_articles(req: Request):
             
         logger.info(f"Received retrieve-articles command: {command} {text}")
         
-        # Pass to handler
-        return await handler.handle(req)
+        # Create a new request object with the form data
+        # This avoids the "Stream consumed" error
+        from starlette.requests import Request as StarletteRequest
+        from starlette.datastructures import Headers
+        
+        # Convert form data to a dict
+        form_dict = dict(form_data)
+        
+        # Create headers dictionary from original request
+        headers_dict = dict(req.headers)
+        
+        # Create a new request object
+        new_req = StarletteRequest(
+            scope={
+                "type": "http",
+                "method": "POST",
+                "headers": [(k.lower().encode(), str(v).encode()) for k, v in headers_dict.items()],
+                "query_string": req.query_params.encode(),
+            }
+        )
+        
+        # Set the form data as the request body
+        setattr(new_req, "_form", form_data)
+        
+        # Pass the new request to handler
+        return await handler.handle(new_req)
     except Exception as e:
         logger.error(f"Error handling retrieve-articles command: {str(e)}", exc_info=True)
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"error": "An internal server error occurred"}
         )
-
-# Rest of the code remains the same...
 
 serve()
