@@ -569,29 +569,8 @@ async def slack_events(req: Request):
                     content={"error": "Too many requests"}
                 )
         
-        # Verify request is from Slack
-        body = await req.json()
-        if not await slack_app.async_client.verify_request(req.headers, await req.body()):
-            logger.warning("Invalid request signature")
-            return JSONResponse(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                content={"error": "Invalid request signature"}
-            )
-        
-        logger.info(f"Received Slack event: {body}")
-        
-        # Handle URL verification
-        if body.get("type") == "url_verification":
-            return {"challenge": body["challenge"]}
-        
         # Handle the event with the Slack handler
         return await handler.handle(req)
-    except json.JSONDecodeError:
-        logger.error("Invalid JSON in request body")
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content={"error": "Invalid JSON"}
-        )
     except Exception as e:
         logger.error(f"Error handling Slack event: {str(e)}", exc_info=True)
         return JSONResponse(
@@ -611,54 +590,8 @@ async def handle_retrieve_articles(req: Request):
                     content={"error": "Too many requests"}
                 )
         
-        # Verify request is from Slack
-        if not await slack_app.async_client.verify_request(req.headers, await req.body()):
-            logger.warning("Invalid request signature")
-            return JSONResponse(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                content={"error": "Invalid request signature"}
-            )
-        
-        # Get form data and validate
-        form_data = await req.form()
-        command = form_data.get("command")
-        text = form_data.get("text")
-        
-        if not command or not text:
-            logger.error("Missing required command parameters")
-            return JSONResponse(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                content={"error": "Missing required parameters"}
-            )
-            
-        logger.info(f"Received retrieve-articles command: {command} {text}")
-        
-        # Create a new request object with the form data
-        # This avoids the "Stream consumed" error
-        from starlette.requests import Request as StarletteRequest
-        from starlette.datastructures import Headers
-        
-        # Convert form data to a dict
-        form_dict = dict(form_data)
-        
-        # Create headers dictionary from original request
-        headers_dict = dict(req.headers)
-        
-        # Create a new request object
-        new_req = StarletteRequest(
-            scope={
-                "type": "http",
-                "method": "POST",
-                "headers": [(k.lower().encode(), str(v).encode()) for k, v in headers_dict.items()],
-                "query_string": req.query_params.encode(),
-            }
-        )
-        
-        # Set the form data as the request body
-        setattr(new_req, "_form", form_data)
-        
-        # Pass the new request to handler
-        return await handler.handle(new_req)
+        # Handle the command with the Slack handler
+        return await handler.handle(req)
     except Exception as e:
         logger.error(f"Error handling retrieve-articles command: {str(e)}", exc_info=True)
         return JSONResponse(
