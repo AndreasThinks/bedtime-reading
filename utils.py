@@ -1,10 +1,12 @@
 import re
 import logging
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 from urllib.parse import urlparse
 from limits.storage import MemoryStorage
 from limits.strategies import MovingWindowRateLimiter
 from config import settings, EmojiConfig
+from datetime import datetime, date
+import dateparser
 
 def setup_logging():
     logging.basicConfig(
@@ -32,6 +34,18 @@ def get_emoji_message(emoji: str) -> str:
     """Get the custom message for a specific emoji."""
     config = settings.EMOJI_CONFIGS.get(emoji)
     return config.message if config else "Saved article to your reading list"
+
+def extract_date_from_message(message: dict) -> Optional[date]:
+    """Extract a date from a message text. Returns None if no valid date is found."""
+    text = message.get("text", "")
+    if not text:
+        return None
+    
+    # Try to parse the date using dateparser
+    parsed_date = dateparser.parse(text)
+    if parsed_date:
+        return parsed_date.date()
+    return None
 
 def sanitize_url(url: str) -> str:
     # Remove any trailing '>' characters and whitespace

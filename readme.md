@@ -7,6 +7,7 @@ This application integrates Slack with Readwise Reader, allowing you to save URL
 ## Features
 - Save URLs shared in Slack to Readwise Reader when specific emoji reactions are added
 - Each emoji reaction saves the article with its specific tag (one tag per article)
+- Query articles by tag and date using emoji reactions
 - Custom confirmation messages for each emoji reaction
 - Configurable newsletter tags for including articles in the newsletter
 - Automatic duplicate detection to prevent saving the same article twice
@@ -56,6 +57,9 @@ Articles with tags listed in NEWSLETTER_TAGS will be included in the newsletter.
 If EMOJI_CONFIGS is not set, it defaults to using the :bookmark: emoji with a standard message and "Read Later" tag.
 
 ## Usage
+The application supports two main modes of operation:
+
+### 1. Saving URLs to Readwise
 1. Add the Slack bot to your workspace and invite it to the desired channels.
 2. When a message containing a URL is posted, react to it with one of your configured emojis.
 3. The bot will:
@@ -63,6 +67,35 @@ If EMOJI_CONFIGS is not set, it defaults to using the :bookmark: emoji with a st
    - Check if it's already saved in Readwise
    - If it's new, save it to Readwise with the emoji's specific tag
    - Post a custom confirmation message in the thread
+
+### 2. Querying Articles by Tag and Date
+1. Send a message containing a date (e.g., "Show me articles since January 1st" or "Get articles from last week")
+2. React to the message with one of your configured emojis
+3. The bot will:
+   - Extract the date from your message
+   - Query Readwise for all articles tagged with that emoji's label since the specified date
+   - Return a list of articles including:
+     - Title
+     - Added date
+     - Summary
+     - URL (if available)
+
+Example:
+```
+You: Show me articles since March 1st
+[React with :brain: emoji]
+Bot: Here are the articles tagged with 'Study Material' since 2024-03-01:
+
+*Introduction to Machine Learning*
+Added on: 2024-03-15
+Summary: A comprehensive guide to the basics of machine learning, covering supervised and unsupervised learning...
+URL: https://example.com/ml-intro
+
+*Python Best Practices*
+Added on: 2024-03-10
+Summary: An in-depth look at Python coding standards and best practices...
+URL: https://example.com/python-best-practices
+```
 
 ## Installation
 To add the application to Slack, you *must* have deployed the back-end on Railway using the process above.
