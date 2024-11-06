@@ -146,13 +146,17 @@ class WallabagClient:
             articles = []
             page = 1
             
+            # Convert the date to a timestamp at midnight of that day
+            since_timestamp = int(datetime.combine(since_date, datetime.min.time()).timestamp())
+            logger.info(f"Fetching articles with tag '{tag}' since timestamp: {since_timestamp}")
+            
             while True:
                 response = requests.get(
                     f"{self.base_url}/api/entries",
                     headers=headers,
                     params={
-                        "tags": [tag],
-                        "since": int(datetime.combine(since_date, datetime.min.time()).timestamp()),
+                        "tags": tag,  # Remove the list brackets as Wallabag expects a string
+                        "since": since_timestamp,
                         "page": page,
                         "perPage": 100
                     },
@@ -179,7 +183,7 @@ class WallabagClient:
             return articles
         except Exception as e:
             logger.error(f"Error getting tagged articles from Wallabag: {str(e)}")
-            return []
+            raise  # Re-raise the exception to handle it in the calling function
 
 # Initialize Wallabag client
 wallabag_client = WallabagClient()
@@ -246,8 +250,11 @@ async def handle_retrieve_command(ack, respond, command):
             })
             return
 
+        # Convert to date object
+        since_date = parsed_date.date()
+
         # Validate date is not in the future
-        if parsed_date.date() > date.today():
+        if since_date > date.today():
             await respond({
                 "response_type": "ephemeral",
                 "text": "The date cannot be in the future."
@@ -255,7 +262,7 @@ async def handle_retrieve_command(ack, respond, command):
             return
 
         # Validate date is not too far in the past (e.g., more than 1 year)
-        if parsed_date.date() < date.today() - timedelta(days=365):
+        if since_date < date.today() - timedelta(days=365):
             await respond({
                 "response_type": "ephemeral",
                 "text": "Please select a date within the last year."
@@ -268,21 +275,21 @@ async def handle_retrieve_command(ack, respond, command):
         # Show initial response
         await respond({
             "response_type": "in_channel",
-            "text": f"Retrieving articles tagged with '{tag}' since {parsed_date.date()}..."
+            "text": f"Retrieving articles tagged with '{tag}' since {since_date}..."
         })
         
         # Query articles
-        articles = await get_tagged_articles_since_date(tag, parsed_date.date())
+        articles = await get_tagged_articles_since_date(tag, since_date)
         
         if not articles:
             await respond({
                 "response_type": "in_channel",
-                "text": f"No articles found with tag '{tag}' since {parsed_date.date()}"
+                "text": f"No articles found with tag '{tag}' since {since_date}"
             })
             return
         
         # Format response as markdown
-        response_text = f"*Articles tagged with '{tag}' since {parsed_date.date()}*\n\n"
+        response_text = f"*Articles tagged with '{tag}' since {since_date}*\n\n"
         
         for article in articles:
             response_text += (

@@ -20,10 +20,16 @@ from utils import setup_logging
 # Initialize logging
 logger = setup_logging()
 
-minimum_item_count = settings.MINIMUM_ITEM_COUNT
-maximum_item_count = settings.MAXIMUM_ITEM_COUNT
-days_to_check = settings.MIN_DAYS_TO_CHECK
-maximum_days_to_check = settings.MAXIMUM_DAYS_TO_CHECK
+# Ensure settings values are integers
+try:
+    minimum_item_count = int(settings.MINIMUM_ITEM_COUNT)
+    maximum_item_count = int(settings.MAXIMUM_ITEM_COUNT)
+    days_to_check = int(settings.MIN_DAYS_TO_CHECK)
+    maximum_days_to_check = int(settings.MAXIMUM_DAYS_TO_CHECK)
+except ValueError as e:
+    logger.error(f"Error converting settings to integers: {str(e)}")
+    raise
+
 EXAMPLE_SCORES_COUNT = 5  # Number of recent scores to include as examples
 
 load_dotenv()
@@ -146,12 +152,11 @@ def query_recent_wallabag_articles(initial_days=None, limit=None):
     logger.info("Querying recent Wallabag articles")
     wallabag_client = WallabagClient()
     
-    if initial_days is None:
-        initial_days = days_to_check
-    if limit is None:
-        limit = maximum_item_count
-    
     try:
+        # Use default values from settings if not provided
+        initial_days = days_to_check if initial_days is None else int(initial_days)
+        limit = maximum_item_count if limit is None else int(limit)
+        
         existing_urls = get_existing_urls()
         logger.debug(f"Found {len(existing_urls)} existing URLs in database")
         
@@ -163,30 +168,45 @@ def query_recent_wallabag_articles(initial_days=None, limit=None):
         new_articles_found = 0
         
         while True:
-            response = requests.get(
-                f"{wallabag_client.base_url}/api/entries",
-                headers=headers,
-                params={
-                    'since': int(cutoff_date.timestamp()),
-                    'page': page,
-                    'perPage': 100,
-                    'tags[]': settings.NEWSLETTER_TAG
-                },
-                timeout=10
-            )
-            response.raise_for_status()
-            data = response.json()
+            try:
+                since_timestamp = int(cutoff_date.timestamp())
+                response = requests.get(
+                    f"{wallabag_client.base_url}/api/entries",
+                    headers=headers,
+                    params={
+                        'since': since_timestamp,
+                        'page': page,
+                        'perPage': 100,
+                        'tags[]': settings.NEWSLETTER_TAG
+                    },
+                    timeout=10
+                )
+                response.raise_for_status()
+                data = response.json()
+            except (ValueError, TypeError) as e:
+                logger.error(f"Error with timestamp conversion or API request: {str(e)}")
+                return []
+            except Exception as e:
+                logger.error(f"Unexpected error in API request: {str(e)}")
+                return []
             
             if not data.get('_embedded', {}).get('items'):
                 break
                 
             for article in data['_embedded']['items']:
                 if article['url'] not in existing_urls:
+                    # Parse the created_at timestamp string
+                    try:
+                        created_at = datetime.strptime(article['created_at'], '%Y-%m-%dT%H:%M:%S%z')
+                    except ValueError:
+                        # Try alternative format if the first one fails
+                        created_at = datetime.fromisoformat(article['created_at'].replace('Z', '+00:00'))
+                    
                     articles.append({
                         "title": article['title'],
                         "url": article['url'],
                         "content": article.get('content', ''),
-                        "saved_at": datetime.fromtimestamp(article['created_at']).isoformat(),
+                        "saved_at": created_at.isoformat(),
                         "api_summary": ""  # Wallabag doesn't provide summaries
                     })
                     new_articles_found += 1
@@ -203,28 +223,43 @@ def query_recent_wallabag_articles(initial_days=None, limit=None):
             current_days += days_to_check
             cutoff_date = datetime.now(pytz.utc) - timedelta(days=current_days)
             
-            response = requests.get(
-                f"{wallabag_client.base_url}/api/entries",
-                headers=headers,
-                params={
-                    'since': int(cutoff_date.timestamp()),
-                    'page': 1,
-                    'perPage': 100,
-                    'tags[]': settings.NEWSLETTER_TAG
-                },
-                timeout=10
-            )
-            response.raise_for_status()
-            data = response.json()
+            try:
+                since_timestamp = int(cutoff_date.timestamp())
+                response = requests.get(
+                    f"{wallabag_client.base_url}/api/entries",
+                    headers=headers,
+                    params={
+                        'since': since_timestamp,
+                        'page': 1,
+                        'perPage': 100,
+                        'tags[]': settings.NEWSLETTER_TAG
+                    },
+                    timeout=10
+                )
+                response.raise_for_status()
+                data = response.json()
+            except (ValueError, TypeError) as e:
+                logger.error(f"Error with timestamp conversion or API request in extended search: {str(e)}")
+                break
+            except Exception as e:
+                logger.error(f"Unexpected error in API request during extended search: {str(e)}")
+                break
             
             if data.get('_embedded', {}).get('items'):
                 for article in data['_embedded']['items']:
                     if article['url'] not in existing_urls:
+                        # Parse the created_at timestamp string
+                        try:
+                            created_at = datetime.strptime(article['created_at'], '%Y-%m-%dT%H:%M:%S%z')
+                        except ValueError:
+                            # Try alternative format if the first one fails
+                            created_at = datetime.fromisoformat(article['created_at'].replace('Z', '+00:00'))
+                        
                         articles.append({
                             "title": article['title'],
                             "url": article['url'],
                             "content": article.get('content', ''),
-                            "saved_at": datetime.fromtimestamp(article['created_at']).isoformat(),
+                            "saved_at": created_at.isoformat(),
                             "api_summary": ""  # Wallabag doesn't provide summaries
                         })
                         new_articles_found += 1
@@ -528,9 +563,9 @@ def render_quarto_to_html():
 def create_newsletter(num_long_summaries=None, num_short_summaries=None):
     logger.info("Starting newsletter creation process")
     if num_long_summaries is None:
-        num_long_summaries = settings.NUMBER_OF_LONG_ARTICLES
+        num_long_summaries = int(settings.NUMBER_OF_LONG_ARTICLES)
     if num_short_summaries is None:
-        num_short_summaries = settings.NUMBER_OF_SHORT_ARTICLES
+        num_short_summaries = int(settings.NUMBER_OF_SHORT_ARTICLES)
 
     last_update = get_last_update_date()
     current_date = datetime.now().date()

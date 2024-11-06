@@ -337,8 +337,18 @@ def home():
         logger.debug("Fetching and sorting articles")
         df = pd.DataFrame(items())
         
-        # Convert saved_at to datetime
-        df['saved_at'] = pd.to_datetime(df['saved_at'])
+        # Convert saved_at to datetime with error handling
+        try:
+            # First try parsing as ISO format
+            df['saved_at'] = pd.to_datetime(df['saved_at'])
+        except (ValueError, TypeError) as e:
+            logger.error(f"Error parsing dates: {str(e)}")
+            # If parsing fails, set to current time
+            df['saved_at'] = pd.Timestamp.now(tz='UTC')
+        
+        # Ensure timezone awareness
+        if df['saved_at'].dt.tz is None:
+            df['saved_at'] = df['saved_at'].dt.tz_localize('UTC')
         
         # Calculate minimum required items
         min_required = (
@@ -354,6 +364,8 @@ def home():
             logger.debug("Calculating combined score based on recency and interest")
             # Calculate a time decay factor (e.g., last 7 days get priority)
             current_time = pd.Timestamp.now(tz='UTC')
+            
+            # Calculate days_old safely
             df['days_old'] = (current_time - df['saved_at']).dt.total_seconds() / (24 * 3600)
             
             # Create a combined score that weighs both recency and interest
