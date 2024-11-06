@@ -9,7 +9,7 @@ This application integrates Slack with Wallabag, allowing you to save URLs share
 - Each emoji reaction saves the article with its specific tag (one tag per article)
 - Query articles by tag and date using the `/retrieve-articles` command
 - Custom confirmation messages for each emoji reaction
-- Configurable newsletter tags for including articles in the newsletter
+- Configurable newsletter tag for including articles in the newsletter
 - Automatic duplicate detection to prevent saving the same article twice
 - Configurable rate limiting
 - Secure handling of environment variables
@@ -30,7 +30,7 @@ Required Environment Variables:
 Optional Environment Variables:
 - `RATE_LIMIT_PER_MINUTE`: Number of requests allowed per minute (default: 20)
 - `EMOJI_CONFIGS`: Configuration for emoji reactions in the format "emoji1:label1:message1;emoji2:label2:message2"
-- `NEWSLETTER_TAGS`: Comma-separated list of tags to include in the newsletter (default: "Newsletter")
+- `NEWSLETTER_TAG`: Tag to include in the newsletter (default: "Newsletter")
 
 Example Configuration:
 
@@ -44,19 +44,19 @@ This creates three different reactions with distinct purposes:
 - :brain: - Tags articles as "Study Material" for learning resources
 - :star: - Tags articles as "Must Read" for important content
 
-2. Newsletter Tags:
+2. Newsletter Tag:
 ```
-NEWSLETTER_TAGS=Must Read,Study Material
+NEWSLETTER_TAGS=must-read
 ```
 
-This configuration would include articles tagged with either "Must Read" or "Study Material" in the newsletter. You can specify any combination of tags that match your emoji configurations.
+This configuration would include articles tagged with the "must-read" tag into the newsletter. You can specify the tag rather than the emoji.
 
 Each article is saved with exactly one tag based on the emoji used. For example:
 - Using :bookmark: saves the article with only the "Read Later" tag
 - Using :brain: saves the article with only the "Study Material" tag
 - Using :star: saves the article with only the "Must Read" tag
 
-Articles with tags listed in NEWSLETTER_TAGS will be included in the newsletter. If NEWSLETTER_TAGS is not set, it defaults to including only articles tagged with "Newsletter".
+If NEWSLETTER_TAG is not set, it defaults to including only articles tagged with "Newsletter".
 
 If EMOJI_CONFIGS is not set, it defaults to using the :bookmark: emoji with a standard message and "Read Later" tag.
 

@@ -46,7 +46,6 @@ class WallabagClient:
     def __init__(self):
         self.access_token = None
         self.token_expires = 0
-        # Ensure the base URL doesn't end with a slash
         self.base_url = settings.WALLABAG_URL.rstrip('/')
 
     async def get_token(self):
@@ -56,7 +55,6 @@ class WallabagClient:
             return self.access_token
 
         try:
-            # Ensure all credentials are properly URL encoded
             data = {
                 "grant_type": "password",
                 "client_id": urllib.parse.quote(settings.WALLABAG_CLIENT_ID),
@@ -65,33 +63,20 @@ class WallabagClient:
                 "password": urllib.parse.quote(settings.WALLABAG_PASSWORD)
             }
 
-            # Log the request URL and data (without sensitive info) for debugging
-            logger.info(f"Requesting token from: {self.base_url}/oauth/v2/token")
-            logger.info(f"Using client_id: {settings.WALLABAG_CLIENT_ID}")
-
             response = requests.post(
                 f"{self.base_url}/oauth/v2/token",
-                headers={
-                    "Content-Type": "application/x-www-form-urlencoded"
-                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
                 data=data,
                 timeout=10
             )
 
-            # Log the response status and content for debugging
-            logger.info(f"Token request status code: {response.status_code}")
-            if response.status_code != 200:
-                logger.error(f"Token request failed with content: {response.text}")
-
             response.raise_for_status()
             data = response.json()
             self.access_token = data["access_token"]
-            self.token_expires = current_time + data["expires_in"] - 300  # Refresh 5 minutes before expiry
+            self.token_expires = current_time + data["expires_in"] - 300
             return self.access_token
         except Exception as e:
             logger.error(f"Error getting Wallabag token: {str(e)}")
-            if isinstance(e, requests.exceptions.RequestException):
-                logger.error(f"Response content: {e.response.text if hasattr(e, 'response') else 'No response content'}")
             raise
 
     async def get_headers(self):
@@ -109,10 +94,7 @@ class WallabagClient:
             response = requests.post(
                 f"{self.base_url}/api/entries",
                 headers=headers,
-                json={
-                    "url": url,
-                    "tags": tags
-                },
+                json={"url": url, "tags": tags},
                 timeout=10
             )
             response.raise_for_status()
@@ -146,63 +128,36 @@ class WallabagClient:
             articles = []
             page = 1
             
-            # Input validation and logging
             if not isinstance(since_date, date):
-                logger.error(f"Invalid since_date type: {type(since_date)}. Expected datetime.date")
                 raise ValueError(f"since_date must be a date object, got {type(since_date)}")
             
-            # Convert the date to a timestamp at midnight of that day
-            try:
-                dt = datetime.combine(since_date, datetime.min.time())
-                since_timestamp = int(dt.timestamp())
-                logger.info(f"Date conversion details:")
-                logger.info(f"  Input date: {since_date}")
-                logger.info(f"  Converted datetime: {dt}")
-                logger.info(f"  Resulting timestamp: {since_timestamp}")
-            except Exception as e:
-                logger.error(f"Error converting date to timestamp: {str(e)}")
-                logger.error(f"Input date: {since_date}, type: {type(since_date)}")
-                raise ValueError(f"Failed to convert date to timestamp: {str(e)}")
-            
-            logger.info(f"Fetching articles with tag '{tag}' since timestamp: {since_timestamp}")
+            dt = datetime.combine(since_date, datetime.min.time())
+            since_timestamp = int(dt.timestamp())
             
             while True:
                 try:
-                    # Log request parameters
-                    request_params = {
-                        "tags": tag,
-                        "since": since_timestamp,
-                        "page": page,
-                        "perPage": 100
-                    }
-                    logger.info(f"Making request with parameters: {request_params}")
-                    
                     response = requests.get(
                         f"{self.base_url}/api/entries",
                         headers=headers,
-                        params=request_params,
+                        params={
+                            "tags": tag,
+                            "since": since_timestamp,
+                            "page": page,
+                            "perPage": 100
+                        },
                         timeout=10
                     )
-                    
-                    # Log response details
-                    logger.info(f"Response status code: {response.status_code}")
-                    if response.status_code != 200:
-                        logger.error(f"API request failed with status {response.status_code}")
-                        logger.error(f"Response content: {response.text}")
                     
                     response.raise_for_status()
                     data = response.json()
                     
                     if not data.get('_embedded', {}).get('items'):
-                        logger.info("No more items found in response")
                         break
                         
                     for entry in data['_embedded']['items']:
                         try:
-                            # Parse the ISO 8601 date string
                             created_at = dateparser.parse(entry['created_at'])
                             if not created_at:
-                                logger.error(f"Could not parse date: {entry['created_at']}")
                                 continue
                                 
                             article = {
@@ -213,30 +168,21 @@ class WallabagClient:
                             articles.append(article)
                         except (ValueError, TypeError) as e:
                             logger.error(f"Error processing entry: {str(e)}")
-                            logger.error(f"Problematic entry: {entry}")
                             continue
                     
                     if page >= data.get('pages', 1):
-                        logger.info(f"Reached last page ({page})")
                         break
                         
                     page += 1
                     
                 except requests.exceptions.RequestException as e:
                     logger.error(f"Request error on page {page}: {str(e)}")
-                    if hasattr(e.response, 'text'):
-                        logger.error(f"Response content: {e.response.text}")
                     raise
                 
-            logger.info(f"Successfully retrieved {len(articles)} articles")
             return articles
             
         except Exception as e:
             logger.error(f"Error getting tagged articles from Wallabag: {str(e)}")
-            logger.error(f"Full error context - Tag: {tag}, Since date: {since_date}")
-            if isinstance(e, requests.exceptions.RequestException) and hasattr(e, 'response'):
-                logger.error(f"Response status: {e.response.status_code}")
-                logger.error(f"Response content: {e.response.text}")
             raise
 
 # Initialize Wallabag client
@@ -248,21 +194,15 @@ async def get_tagged_articles_since_date(tag: str, since_date: date) -> list:
         return await wallabag_client.get_tagged_articles(tag, since_date)
     except Exception as e:
         logger.error(f"Error in get_tagged_articles_since_date: {str(e)}")
-        logger.error(f"Parameters - Tag: {tag}, Since date: {since_date} (type: {type(since_date)})")
         raise
 
 async def save_url_to_wallabag(url: str, emoji: str) -> tuple[bool, str]:
     """Save a URL to Wallabag with the emoji's label as a tag."""
     try:
-        # Get emoji configuration to use its label as a tag
         emoji_configs = get_emoji_configs()
         emoji_config = emoji_configs.get(emoji)
-        
-        # Use the emoji's label as the tag
         tag = emoji_config.label if emoji_config else "Read Later"
-        
         return await wallabag_client.save_url(url, [tag])
-            
     except Exception as e:
         logger.error(f"Error saving URL to Wallabag: {str(e)}")
         return False, str(e)
@@ -277,7 +217,6 @@ async def handle_retrieve_command(ack, respond, command):
     await ack()
     
     try:
-        # Parse command text (expected format: "emoji date")
         parts = command['text'].strip().split(maxsplit=1)
         if len(parts) != 2:
             await respond({
@@ -287,11 +226,8 @@ async def handle_retrieve_command(ack, respond, command):
             return
 
         emoji, date_str = parts
-        
-        # Remove colons from emoji if present
         emoji = emoji.strip(':')
         
-        # Validate emoji
         emoji_configs = get_emoji_configs()
         if emoji not in emoji_configs:
             await respond({
@@ -300,22 +236,16 @@ async def handle_retrieve_command(ack, respond, command):
             })
             return
         
-        # Parse date with detailed logging
-        logger.info(f"Parsing date string: {date_str}")
         parsed_date = dateparser.parse(date_str)
         if not parsed_date:
-            logger.error(f"Failed to parse date string: {date_str}")
             await respond({
                 "response_type": "ephemeral",
                 "text": "Could not parse the date. Please provide a clear date format like '2024-01-01' or 'January 1st'"
             })
             return
 
-        # Convert to date object
         since_date = parsed_date.date()
-        logger.info(f"Successfully parsed date: {since_date} (type: {type(since_date)})")
 
-        # Validate date is not in the future
         if since_date > date.today():
             await respond({
                 "response_type": "ephemeral",
@@ -323,7 +253,6 @@ async def handle_retrieve_command(ack, respond, command):
             })
             return
 
-        # Validate date is not too far in the past (e.g., more than 1 year)
         if since_date < date.today() - timedelta(days=365):
             await respond({
                 "response_type": "ephemeral",
@@ -331,18 +260,14 @@ async def handle_retrieve_command(ack, respond, command):
             })
             return
 
-        # Get tag from emoji config
         tag = emoji_configs[emoji].label
-        logger.info(f"Using tag '{tag}' for emoji '{emoji}'")
         
-        # Show initial response
         await respond({
             "response_type": "in_channel",
             "text": f"Retrieving articles tagged with '{tag}' since {since_date}..."
         })
         
         try:
-            # Query articles
             articles = await get_tagged_articles_since_date(tag, since_date)
             
             if not articles:
@@ -352,7 +277,6 @@ async def handle_retrieve_command(ack, respond, command):
                 })
                 return
             
-            # Format response as markdown
             response_text = f"*Articles tagged with '{tag}' since {since_date}*\n\n"
             
             for article in articles:
@@ -362,7 +286,6 @@ async def handle_retrieve_command(ack, respond, command):
                     f"  <{article['url']}|Read article>\n\n"
                 )
 
-            # Split message if it's too long for Slack (max 40000 chars)
             max_length = 40000
             chunks = [response_text[i:i + max_length] for i in range(0, len(response_text), max_length)]
             
@@ -387,7 +310,7 @@ async def handle_retrieve_command(ack, respond, command):
         })
 
 @app.event("reaction_added")
-@deduplicator.deduplicate(ttl=60)  # Set TTL to 60 seconds
+@deduplicator.deduplicate(ttl=60)
 async def handle_reaction(event, say, client):
     reaction = event['reaction']
     if reaction not in trigger_emojis:
@@ -406,16 +329,12 @@ async def handle_reaction(event, say, client):
             message = result.data["messages"][0]
             url = extract_and_validate_url(message)
             if url:
-                # First, check if the URL already exists
                 url_exists = await check_url_exists(url)
                 if url_exists:
                     logger.info(f"URL already exists in Wallabag, skipping: {url}")
-                    # No message is posted to Slack for duplicate URLs
                 else:
-                    # If the URL doesn't exist, save it with the emoji's tag
                     success, result = await save_url_to_wallabag(url, reaction)
                     if success:
-                        # Get custom message for the specific emoji
                         custom_message = get_emoji_message(reaction)
                         reply_text = f"{custom_message}: {result}"
                         await client.chat_postMessage(
