@@ -146,51 +146,105 @@ class WallabagClient:
             articles = []
             page = 1
             
+            # Input validation and logging
+            if not isinstance(since_date, date):
+                logger.error(f"Invalid since_date type: {type(since_date)}. Expected datetime.date")
+                raise ValueError(f"since_date must be a date object, got {type(since_date)}")
+            
             # Convert the date to a timestamp at midnight of that day
-            since_timestamp = int(datetime.combine(since_date, datetime.min.time()).timestamp())
+            try:
+                dt = datetime.combine(since_date, datetime.min.time())
+                since_timestamp = int(dt.timestamp())
+                logger.info(f"Date conversion details:")
+                logger.info(f"  Input date: {since_date}")
+                logger.info(f"  Converted datetime: {dt}")
+                logger.info(f"  Resulting timestamp: {since_timestamp}")
+            except Exception as e:
+                logger.error(f"Error converting date to timestamp: {str(e)}")
+                logger.error(f"Input date: {since_date}, type: {type(since_date)}")
+                raise ValueError(f"Failed to convert date to timestamp: {str(e)}")
+            
             logger.info(f"Fetching articles with tag '{tag}' since timestamp: {since_timestamp}")
             
             while True:
-                response = requests.get(
-                    f"{self.base_url}/api/entries",
-                    headers=headers,
-                    params={
-                        "tags": tag,  # Remove the list brackets as Wallabag expects a string
+                try:
+                    # Log request parameters
+                    request_params = {
+                        "tags": tag,
                         "since": since_timestamp,
                         "page": page,
                         "perPage": 100
-                    },
-                    timeout=10
-                )
-                response.raise_for_status()
-                data = response.json()
-                
-                if not data.get('_embedded', {}).get('items'):
-                    break
+                    }
+                    logger.info(f"Making request with parameters: {request_params}")
                     
-                for entry in data['_embedded']['items']:
-                    articles.append({
-                        'title': entry.get('title', 'No title'),
-                        'date': datetime.fromtimestamp(entry['created_at']).strftime('%Y-%m-%d'),
-                        'url': entry.get('url', '')
-                    })
-                
-                if page >= data.get('pages', 1):
-                    break
+                    response = requests.get(
+                        f"{self.base_url}/api/entries",
+                        headers=headers,
+                        params=request_params,
+                        timeout=10
+                    )
                     
-                page += 1
+                    # Log response details
+                    logger.info(f"Response status code: {response.status_code}")
+                    if response.status_code != 200:
+                        logger.error(f"API request failed with status {response.status_code}")
+                        logger.error(f"Response content: {response.text}")
+                    
+                    response.raise_for_status()
+                    data = response.json()
+                    
+                    if not data.get('_embedded', {}).get('items'):
+                        logger.info("No more items found in response")
+                        break
+                        
+                    for entry in data['_embedded']['items']:
+                        try:
+                            created_at = int(entry['created_at'])  # Ensure integer conversion
+                            article = {
+                                'title': entry.get('title', 'No title'),
+                                'date': datetime.fromtimestamp(created_at).strftime('%Y-%m-%d'),
+                                'url': entry.get('url', '')
+                            }
+                            articles.append(article)
+                        except (ValueError, TypeError) as e:
+                            logger.error(f"Error processing entry: {str(e)}")
+                            logger.error(f"Problematic entry: {entry}")
+                            continue
+                    
+                    if page >= data.get('pages', 1):
+                        logger.info(f"Reached last page ({page})")
+                        break
+                        
+                    page += 1
+                    
+                except requests.exceptions.RequestException as e:
+                    logger.error(f"Request error on page {page}: {str(e)}")
+                    if hasattr(e.response, 'text'):
+                        logger.error(f"Response content: {e.response.text}")
+                    raise
                 
+            logger.info(f"Successfully retrieved {len(articles)} articles")
             return articles
+            
         except Exception as e:
             logger.error(f"Error getting tagged articles from Wallabag: {str(e)}")
-            raise  # Re-raise the exception to handle it in the calling function
+            logger.error(f"Full error context - Tag: {tag}, Since date: {since_date}")
+            if isinstance(e, requests.exceptions.RequestException) and hasattr(e, 'response'):
+                logger.error(f"Response status: {e.response.status_code}")
+                logger.error(f"Response content: {e.response.text}")
+            raise
 
 # Initialize Wallabag client
 wallabag_client = WallabagClient()
 
 async def get_tagged_articles_since_date(tag: str, since_date: date) -> list:
     """Get articles with a specific tag since a given date."""
-    return await wallabag_client.get_tagged_articles(tag, since_date)
+    try:
+        return await wallabag_client.get_tagged_articles(tag, since_date)
+    except Exception as e:
+        logger.error(f"Error in get_tagged_articles_since_date: {str(e)}")
+        logger.error(f"Parameters - Tag: {tag}, Since date: {since_date} (type: {type(since_date)})")
+        raise
 
 async def save_url_to_wallabag(url: str, emoji: str) -> tuple[bool, str]:
     """Save a URL to Wallabag with the emoji's label as a tag."""
@@ -241,9 +295,11 @@ async def handle_retrieve_command(ack, respond, command):
             })
             return
         
-        # Parse date
+        # Parse date with detailed logging
+        logger.info(f"Parsing date string: {date_str}")
         parsed_date = dateparser.parse(date_str)
         if not parsed_date:
+            logger.error(f"Failed to parse date string: {date_str}")
             await respond({
                 "response_type": "ephemeral",
                 "text": "Could not parse the date. Please provide a clear date format like '2024-01-01' or 'January 1st'"
@@ -252,6 +308,7 @@ async def handle_retrieve_command(ack, respond, command):
 
         # Convert to date object
         since_date = parsed_date.date()
+        logger.info(f"Successfully parsed date: {since_date} (type: {type(since_date)})")
 
         # Validate date is not in the future
         if since_date > date.today():
@@ -271,6 +328,7 @@ async def handle_retrieve_command(ack, respond, command):
 
         # Get tag from emoji config
         tag = emoji_configs[emoji].label
+        logger.info(f"Using tag '{tag}' for emoji '{emoji}'")
         
         # Show initial response
         await respond({
@@ -278,34 +336,42 @@ async def handle_retrieve_command(ack, respond, command):
             "text": f"Retrieving articles tagged with '{tag}' since {since_date}..."
         })
         
-        # Query articles
-        articles = await get_tagged_articles_since_date(tag, since_date)
-        
-        if not articles:
-            await respond({
-                "response_type": "in_channel",
-                "text": f"No articles found with tag '{tag}' since {since_date}"
-            })
-            return
-        
-        # Format response as markdown
-        response_text = f"*Articles tagged with '{tag}' since {since_date}*\n\n"
-        
-        for article in articles:
-            response_text += (
-                f"• *{article['title']}*\n"
-                f"  Added on: {article['date']}\n"
-                f"  <{article['url']}|Read article>\n\n"
-            )
+        try:
+            # Query articles
+            articles = await get_tagged_articles_since_date(tag, since_date)
+            
+            if not articles:
+                await respond({
+                    "response_type": "in_channel",
+                    "text": f"No articles found with tag '{tag}' since {since_date}"
+                })
+                return
+            
+            # Format response as markdown
+            response_text = f"*Articles tagged with '{tag}' since {since_date}*\n\n"
+            
+            for article in articles:
+                response_text += (
+                    f"• *{article['title']}*\n"
+                    f"  Added on: {article['date']}\n"
+                    f"  <{article['url']}|Read article>\n\n"
+                )
 
-        # Split message if it's too long for Slack (max 40000 chars)
-        max_length = 40000
-        chunks = [response_text[i:i + max_length] for i in range(0, len(response_text), max_length)]
-        
-        for chunk in chunks:
+            # Split message if it's too long for Slack (max 40000 chars)
+            max_length = 40000
+            chunks = [response_text[i:i + max_length] for i in range(0, len(response_text), max_length)]
+            
+            for chunk in chunks:
+                await respond({
+                    "response_type": "in_channel",
+                    "text": chunk
+                })
+                
+        except Exception as e:
+            logger.error(f"Error retrieving articles: {str(e)}")
             await respond({
-                "response_type": "in_channel",
-                "text": chunk
+                "response_type": "ephemeral",
+                "text": f"Error retrieving articles: {str(e)}"
             })
             
     except Exception as e:
