@@ -199,10 +199,15 @@ class WallabagClient:
                         
                     for entry in data['_embedded']['items']:
                         try:
-                            created_at = int(entry['created_at'])  # Ensure integer conversion
+                            # Parse the ISO 8601 date string
+                            created_at = dateparser.parse(entry['created_at'])
+                            if not created_at:
+                                logger.error(f"Could not parse date: {entry['created_at']}")
+                                continue
+                                
                             article = {
                                 'title': entry.get('title', 'No title'),
-                                'date': datetime.fromtimestamp(created_at).strftime('%Y-%m-%d'),
+                                'date': created_at.strftime('%Y-%m-%d'),
                                 'url': entry.get('url', '')
                             }
                             articles.append(article)
